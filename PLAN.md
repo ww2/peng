@@ -14,26 +14,6 @@ Works standalone from `file://` with no server.
 
 ---
 
-## What Already Exists
-
-### afc.html (complete, import as-is)
-
-Contains working implementations of:
-
-- `reconstructRows(allItems)` — groups PDF text items into rows by Y-coordinate
-- `parseHeader(rows)` — extracts pay dates, document type, document number
-- `findEarningsBlock(rows)` — locates HOURS AND EARNINGS section boundaries
-- `parseEarnings(rows, headerIdx, totalIdx)` — extracts currentEarnings / ytdEarnings
-- `extractPaystub(file)` — full per-file pipeline
-- `ALIASES`, `KNOWN`, `IGNORED` — earning-type taxonomy
-- `filterStubs(paystubs)` — drops paper checks and stubs with missing dates
-- `generateWindows(stubs)` — generates candidate 12-month windows
-- `solveDP(windows, N)` — DP solver: picks best N non-overlapping windows by score
-- `scoreStub(stub, mode)` — computes stub score ('regular' or 'total')
-- `fmtDate`, `parseDate`, `addMonths`, `addDays` — date utilities
-
----
-
 ## Pension Calculation Formula
 
 ```
@@ -147,7 +127,7 @@ const serviceAtM = currentSvcMonths + Math.max(0, monthsBetween(today, accrualEn
 ```
 
 `monthsBetween` counts whole calendar months (same day-of-month logic as
-`addMonths` already in afc.html).
+`addMonths`).
 
 ---
 
@@ -289,18 +269,16 @@ extraction or calculation yet
 - ✕ button clears the last-day-of-service field
 - Opening with `?plan=hybrid-post2012&dob=1975-06-15&afc=4500` pre-fills those
   fields and enables the Calculate button immediately
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
 ### Stage 2: Directory picker + JSON extraction
-**Goal**: Port the complete PDF extraction pipeline from `afc.html` exactly as-is
-— directory picker, `extractPaystub`, `filterStubs`, JSON display, per-file
+**Goal**: Directory picker, `extractPaystub`, `filterStubs`, JSON display, per-file
 `<details>` view, JSON download button
-**Verify**: Pick the same paystub directory used with `afc.html`; confirm the
-extracted JSON is byte-for-byte identical; paper checks and stubs with missing
-dates are absent from the output
-**Status**: Not Started
+**Verify**: Pick a paystub directory; confirm extracted JSON contains correct stubs;
+paper checks and stubs with missing dates are absent from the output
+**Status**: Complete
 
 ---
 

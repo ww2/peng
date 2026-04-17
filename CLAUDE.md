@@ -31,9 +31,10 @@ Supported params: `plan`, `dob`, `svcYears`, `svcMonths`, `lastDay`, `afc`
 
 `PLAN.md` is the authoritative spec. Current status:
 - **Stage 1** (scaffold + form + URL params): complete
-- **Stages 2–12**: not yet started
+- **Stage 2** (directory picker + PDF extraction): complete
+- **Stages 3–12**: not yet started
 
-Stages in order: directory picker + PDF extraction (port from `afc.html`) → plan dropdown + AFC computation → manual AFC override → date utilities → pension series table (noncontributory, then all plans) → D3 axes → pension curve → ineligible shading → full form wiring → hover tooltip.
+Stages in order: directory picker + PDF extraction → plan dropdown + AFC computation → manual AFC override → date utilities → pension series table (noncontributory, then all plans) → D3 axes → pension curve → ineligible shading → full form wiring → hover tooltip.
 
 ## Key Logic
 
@@ -66,14 +67,6 @@ const accrualEnd = lastDayOfSvc
   : retDate;
 const serviceAtM = currentSvcMonths + Math.max(0, monthsBetween(today, accrualEnd));
 ```
-
-## Existing Code to Port (Stage 2)
-
-`afc.html` contains the complete, working PDF extraction pipeline to import as-is:
-- `reconstructRows`, `parseHeader`, `findEarningsBlock`, `parseEarnings`, `extractPaystub`
-- `ALIASES`, `KNOWN`, `IGNORED` (earning-type taxonomy)
-- `filterStubs`, `generateWindows`, `solveDP`, `scoreStub`
-- Date utilities: `fmtDate`, `parseDate`, `addMonths`, `addDays`
 
 ## Plan Eligibility Rules
 

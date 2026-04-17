@@ -56,36 +56,27 @@
     .field-pair { display: flex; gap: 0.5rem; }
     .field-pair .field { flex: 1; }
 
-    /* ── Group 2 two-column layout ── */
-    #group-2-inner {
-      display: grid;
-      grid-template-columns: 1fr auto 1fr;
-      gap: 0 1rem;
-      align-items: start;
-    }
-
+    /* ── Group 2 stacked layout ── */
     .or-divider {
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
       align-items: center;
-      padding-top: 1.6rem;
       color: #999;
       font-size: 0.8rem;
-      white-space: nowrap;
-      gap: 0.4rem;
+      gap: 0.5rem;
+      margin: 0.75rem 0;
     }
 
     .or-divider::before,
     .or-divider::after {
       content: '';
-      display: block;
-      width: 1px;
-      height: 2rem;
+      flex: 1;
+      height: 1px;
       background: #ccc;
     }
 
     /* ── AFC computed display ── */
-    #afc-computed {
+    #afc-computed, #afc-date-range, #picker-count {
       margin-top: 0.5rem;
       font-size: 0.85rem;
       min-height: 1.2em;
@@ -154,6 +145,42 @@
   <h1>ERS Pension Graph</h1>
   <p id="reload-bar"><a id="reload-link" href="#">Reload</a></p>
 
+  <!-- ── Group 2: Earnings data ───────────────────────────────── -->
+  <fieldset id="group-2">
+    <legend>Earnings data</legend>
+
+    <!-- Option A: paystub directory -->
+    <div id="group-2a">
+      <div class="field">
+        <label for="picker-btn">Paystub directory</label>
+        <div>
+          <button id="picker-btn" type="button">Choose directory…</button>
+          <input type="file" id="picker" webkitdirectory accept=".pdf" style="display:none">
+        </div>
+        <div id="picker-count"></div>
+      </div>
+      <div id="afc-computed"></div>
+      <div id="afc-date-range"></div>
+      <details id="debug-details">
+        <summary>Show paystub detail / Export JSON</summary>
+        <div class="details-body" id="debug-body">
+          <!-- populated in Stage 2 -->
+        </div>
+      </details>
+    </div>
+
+    <div class="or-divider">or</div>
+
+    <!-- Option B: manual AFC -->
+    <div id="group-2b">
+      <div class="field">
+        <label for="manual-afc">Monthly AFC ($)</label>
+        <input type="text" inputmode="decimal" id="manual-afc" placeholder="e.g. 4413.00">
+      </div>
+    </div>
+
+  </fieldset>
+
   <!-- ── Group 1: Your information ───────────────────────────── -->
   <fieldset id="group-1">
     <legend>Your information</legend>
@@ -198,39 +225,6 @@
     </div>
   </fieldset>
 
-  <!-- ── Group 2: Earnings data ───────────────────────────────── -->
-  <fieldset id="group-2">
-    <legend>Earnings data</legend>
-    <div id="group-2-inner">
-
-      <!-- Option A: paystub directory -->
-      <div id="group-2a">
-        <div class="field">
-          <label for="picker">Paystub directory</label>
-          <input type="file" id="picker" webkitdirectory accept=".pdf">
-        </div>
-        <div id="afc-computed"></div>
-        <details id="debug-details">
-          <summary>Show paystub detail / Export JSON</summary>
-          <div class="details-body" id="debug-body">
-            <!-- populated in Stage 2 -->
-          </div>
-        </details>
-      </div>
-
-      <div class="or-divider">or</div>
-
-      <!-- Option B: manual AFC -->
-      <div id="group-2b">
-        <div class="field">
-          <label for="manual-afc">Monthly AFC ($)</label>
-          <input type="number" id="manual-afc" min="0" step="0.01" placeholder="e.g. 4413.00">
-        </div>
-      </div>
-
-    </div>
-  </fieldset>
-
   <!-- ── Calculate ────────────────────────────────────────────── -->
   <div id="action-row">
     <button id="calc-btn" disabled>Calculate</button>
@@ -246,9 +240,116 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
 
-    // Stage 1 smoke-test — remove in Stage 2
-    console.log('d3 scaleLinear:', typeof d3.scaleLinear);
-    console.log('pdfjs version:', pdfjsLib.version);
+    // ── Directory picker ─────────────────────────────────────────
+    let pdfFiles = {};
+
+    document.getElementById('picker-btn').addEventListener('click', () => {
+      document.getElementById('picker').click();
+    });
+
+    // Some browsers restore file input selections across reloads; clear on load.
+    document.getElementById('picker').value = '';
+    document.getElementById('picker-count').textContent = '';
+    document.getElementById('afc-date-range').textContent = '';
+
+    document.getElementById('picker').addEventListener('change', async function () {
+      const pdfs = Array.from(this.files)
+        .filter(f => f.name.toLowerCase().endsWith('.pdf'))
+        .sort((a, b) => a.webkitRelativePath.localeCompare(b.webkitRelativePath));
+
+      pdfFiles = {};
+      pdfs.forEach(f => { pdfFiles[f.webkitRelativePath] = f; });
+
+      document.getElementById('picker-count').textContent =
+        `${this.files.length} files selected (${pdfs.length} PDF${pdfs.length !== 1 ? 's' : ''})`;
+
+      const afcComputedEl = document.getElementById('afc-computed');
+      const debugBody     = document.getElementById('debug-body');
+
+      afcComputedEl.textContent = 'Extracting…';
+      debugBody.innerHTML = '';
+
+      const results = [];
+      const errors  = [];
+      for (let i = 0; i < pdfs.length; i++) {
+        afcComputedEl.textContent = `Extracting… ${i + 1} / ${pdfs.length}`;
+        try {
+          const result = await extractPaystub(pdfs[i]);
+          delete result._rows; delete result._block; delete result._warnings;
+          results.push(result);
+        } catch (err) {
+          errors.push({ file: pdfs[i].webkitRelativePath, error: err.message });
+        }
+      }
+
+      results.sort((a, b) => (a.documentNumber ?? '').localeCompare(b.documentNumber ?? ''));
+
+      const output = { aliases: REVERSED_ALIASES, paystubs: results };
+      if (errors.length) output.errors = errors;
+
+      const { stubs, dropped } = filterStubs(results);
+      const windows = generateWindows(stubs);
+      const json    = toJson(output);
+
+      // 1. Count line with toggle, expand-all, and download buttons
+      const countP       = document.createElement('p');
+      const toggleBtn    = document.createElement('button');
+      const expandAllBtn = document.createElement('button');
+      const dlBtn        = document.createElement('button');
+
+      toggleBtn.className      = 'toggle-rows';
+      toggleBtn.textContent    = 'show ▶';
+      expandAllBtn.id          = 'expand-all';
+      expandAllBtn.textContent = 'Expand all';
+      dlBtn.textContent        = 'Download JSON';
+
+      countP.append(
+        `${pdfs.length} PDF${pdfs.length !== 1 ? 's' : ''} found (`,
+        toggleBtn, '). ',
+        expandAllBtn, ' ',
+        dlBtn
+      );
+      debugBody.appendChild(countP);
+
+      dlBtn.addEventListener('click', () => {
+        const blob = new Blob([json], { type: 'application/json' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href = url; a.download = 'paystubs.json'; a.click();
+        URL.revokeObjectURL(url);
+      });
+
+      // 2. File list (hidden by default, toggled by show button)
+      const listEl  = document.createElement('ul');
+      listEl.id     = 'files';
+      listEl.hidden = true;
+      pdfs.forEach(f => listEl.appendChild(makeFileEntry(f)));
+      debugBody.appendChild(listEl);
+
+      toggleBtn.addEventListener('click', () => {
+        listEl.hidden = !listEl.hidden;
+        toggleBtn.textContent = listEl.hidden ? 'show ▶' : 'hide ▼';
+      });
+      expandAllBtn.addEventListener('click', () => expandAll(listEl));
+
+      // 3. Filter summary
+      const summaryPre = document.createElement('pre');
+      summaryPre.textContent = showFilterSummary(results.length, stubs, dropped, errors, windows);
+      debugBody.appendChild(summaryPre);
+
+      // Status lines
+      const toYmd = s => { const [m, d, y] = s.split('/'); return `${y}/${m}/${d}`; };
+      const first = stubs[0];
+      const last  = stubs[stubs.length - 1];
+      afcComputedEl.textContent =
+        `${stubs.length} stub${stubs.length !== 1 ? 's' : ''} extracted · select a plan to compute AFC`;
+      document.getElementById('afc-date-range').textContent = (first && last)
+        ? `Paystubs from ${toYmd(first.payBeginDate)} to ${toYmd(last.payEndDate)}`
+        : '';
+
+      window.afcComputed = null;
+      updateCalcBtn();
+    });
 
     // ── PDF parsing constants ─────────────────────────────────────
 
@@ -435,6 +536,309 @@
         _block   : block,
         _warnings: warnings,
       };
+    }
+
+    // ── Date utilities ───────────────────────────────────────────
+    // Parse MM/dd/yyyy → Date
+    function parseDate(s) {
+      const [m, d, y] = s.split('/');
+      return new Date(+y, +m - 1, +d);
+    }
+
+    function addMonths(date, n) {
+      const d = new Date(date);
+      d.setMonth(d.getMonth() + n);
+      return d;
+    }
+
+    function addDays(date, n) {
+      const d = new Date(date);
+      d.setDate(d.getDate() + n);
+      return d;
+    }
+
+    // Format Date → MM/dd/yyyy
+    function fmtDate(date) {
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${m}/${d}/${date.getFullYear()}`;
+    }
+
+    // ── AFC pipeline ─────────────────────────────────────────────
+    function typeRank(k) {
+      return k === 'Regular' ? 0 : k.includes('Overtime') ? 1 : k.includes('Night') ? 2 : 3;
+    }
+
+    function typeSort(a, b) {
+      return typeRank(a) - typeRank(b) || a.localeCompare(b);
+    }
+
+    function fmtMoney(v) {
+      return v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+
+    // Apply the same filters as findBestIntervals.groovy.
+    // Returns { stubs, dropped } where dropped is [{ file, reason }].
+    function filterStubs(paystubs) {
+      const dropped = [];
+      const stubs   = [];
+
+      for (const s of paystubs) {
+        if (s.documentType === 'check') {
+          dropped.push({ file: s.file, reason: 'paper check' });
+          continue;
+        }
+        if (!s.payBeginDate || !s.payEndDate) {
+          dropped.push({ file: s.file, reason: 'missing dates' });
+          continue;
+        }
+        const earnings = Object.fromEntries(
+          Object.entries(s.currentEarnings ?? {}).filter(([k]) => !IGNORED.has(k))
+        );
+        stubs.push({
+          file           : s.file,
+          payBeginDate   : s.payBeginDate,
+          payEndDate     : s.payEndDate,
+          beginDate      : parseDate(s.payBeginDate),
+          endDate        : parseDate(s.payEndDate),
+          currentEarnings: earnings,
+        });
+      }
+
+      stubs.sort((a, b) => a.beginDate - b.beginDate);
+      return { stubs, dropped };
+    }
+
+    function generateWindows(stubs) {
+      if (!stubs.length) return [];
+
+      const firstMonth = new Date(
+        stubs[0].beginDate.getFullYear(), stubs[0].beginDate.getMonth(), 1);
+
+      // Find latest stub whose endDate is the last day of its month.
+      // Scan backwards (stubs sorted by beginDate ≈ endDate order).
+      const isMonthEnd = d => addDays(d, 1).getDate() === 1;
+      let lastAnchorEnd = null;
+      for (let i = stubs.length - 1; i >= 0; i--) {
+        if (isMonthEnd(stubs[i].endDate)) { lastAnchorEnd = stubs[i].endDate; break; }
+      }
+      // lastMonth = window start such that its endIncl === lastAnchorEnd
+      const lastMonth = lastAnchorEnd
+        ? addMonths(addDays(lastAnchorEnd, 1), -12)
+        : new Date(stubs[stubs.length - 1].beginDate.getFullYear(),
+                   stubs[stubs.length - 1].beginDate.getMonth(), 1);
+
+      const windows = [];
+      let start = new Date(firstMonth);
+      while (start <= lastMonth) {
+        const endIncl  = addDays(addMonths(start, 12), -1);
+        const included = stubs.filter(s => s.beginDate >= start && s.endDate <= endIncl);
+        windows.push({ start: new Date(start), endIncl, stubs: included });
+        start = addMonths(start, 1);
+      }
+      return windows;
+    }
+
+    function scoreStub(stub, mode) {
+      const e = stub.currentEarnings;
+      if (mode === 'regular') return e['Regular'] ?? 0;
+      return Object.values(e).reduce((s, v) => s + v, 0);
+    }
+
+    // Exact DP: O(N × C²). Returns { selected, total } or null if unsolvable.
+    function solveDP(windows, N) {
+      const C    = windows.length;
+      const dp   = Array.from({length: N + 1}, () => new Array(C).fill(null));
+      const back = Array.from({length: N + 1}, () => new Array(C).fill(-1));
+
+      for (let i = 0; i < C; i++) dp[1][i] = windows[i].score;
+
+      for (let j = 2; j <= N; j++) {
+        for (let i = 0; i < C; i++) {
+          for (let k = 0; k < i; k++) {
+            if (dp[j-1][k] === null) continue;
+            if (windows[k].endIncl >= windows[i].start) continue; // overlap
+            const candidate = dp[j-1][k] + windows[i].score;
+            if (dp[j][i] === null || candidate > dp[j][i]) {
+              dp[j][i] = candidate;
+              back[j][i] = k;
+            }
+          }
+        }
+      }
+
+      let bestEnd = -1, bestTotal = null;
+      for (let i = 0; i < C; i++) {
+        if (dp[N][i] !== null && (bestTotal === null || dp[N][i] > bestTotal)) {
+          bestTotal = dp[N][i]; bestEnd = i;
+        }
+      }
+      if (bestEnd < 0) return null;
+
+      const selected = [];
+      let idx = bestEnd;
+      for (let j = N; j >= 1; j--) { selected.push(windows[idx]); idx = back[j][idx]; }
+      selected.reverse();
+      return { selected, total: bestTotal };
+    }
+
+    // ── Display helpers ──────────────────────────────────────────
+    // Serialize to JSON with monetary values formatted to exactly 2 decimal places,
+    // matching Groovy's BigDecimal serialization (e.g. 4413.00 not 4413).
+    function toJson(obj) {
+      return JSON.stringify(obj, (_key, val) => {
+        if (typeof val === 'number') return `§${val.toFixed(2)}§`;
+        return val;
+      }, 4).replace(/"§(.+?)§"/g, '$1');
+    }
+
+    function formatFields(result, { sectionIdx, headerIdx, totalIdx }, warnings, rows) {
+      const dataRowCount = (headerIdx >= 0 && totalIdx > headerIdx)
+        ? totalIdx - headerIdx - 1 : '?';
+
+      const rowLabel = (idx, label) => {
+        const found = idx >= 0 ? `row ${idx}  →  ${rowToString(rows[idx].items)}` : '(not found)';
+        return `${label.padEnd(12)} ${found}`;
+      };
+
+      const fmt = v => v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+      const earningsLines = Object.entries(result.currentEarnings)
+        .map(([k, v]) => {
+          const ytd = result.ytdEarnings[k];
+          return `  ${k.padEnd(32)} current: ${fmt(v).padStart(10)}` +
+                 (ytd != null ? `   ytd: ${fmt(ytd).padStart(10)}` : '');
+        });
+
+      return [
+        ...['payBeginDate','payEndDate','issueDate','documentType','documentNumber']
+          .map(k => `${k.padEnd(16)} ${result[k] ?? '(missing)'}`),
+        '',
+        rowLabel(sectionIdx, 'sectionIdx'),
+        rowLabel(headerIdx,  'headerIdx'),
+        rowLabel(totalIdx,   'totalIdx'),
+        `${'data rows'.padEnd(16)} ${dataRowCount}`,
+        '',
+        'currentEarnings:',
+        ...(earningsLines.length ? earningsLines : ['  (none)']),
+        ...(warnings.length ? ['', 'warnings:', ...warnings.map(w => `  ${w}`)] : []),
+      ].join('\n');
+    }
+
+    async function populateOutput(file, output) {
+      output.textContent = 'Loading…';
+      output.hidden      = false;
+
+      try {
+        const result   = await extractPaystub(file);
+        const rows     = result._rows;
+        const block    = result._block;
+        const warnings = result._warnings;
+        delete result._rows; delete result._block; delete result._warnings;
+
+        output.textContent = '';
+
+        const fieldsEl = document.createElement('pre');
+        fieldsEl.className   = 'fields-out';
+        fieldsEl.textContent = formatFields(result, block, warnings, rows);
+        output.appendChild(fieldsEl);
+
+        const toggleBtn = document.createElement('button');
+        toggleBtn.className   = 'toggle-rows';
+        toggleBtn.textContent = 'show rows ▶';
+        output.appendChild(toggleBtn);
+
+        const dumpEl = document.createElement('pre');
+        dumpEl.className   = 'dump-out';
+        dumpEl.hidden      = true;
+        dumpEl.textContent = rows.map(r => rowToString(r.items)).join('\n');
+        output.appendChild(dumpEl);
+
+        toggleBtn.addEventListener('click', () => {
+          dumpEl.hidden = !dumpEl.hidden;
+          toggleBtn.textContent = dumpEl.hidden ? 'show rows ▶' : 'hide rows ▼';
+        });
+
+        output.dataset.parsed = '1';
+      } catch (err) {
+        output.textContent = `ERROR: ${err.message}`;
+      }
+    }
+
+    function makeFileEntry(file) {
+      const li = document.createElement('li');
+
+      const link = document.createElement('span');
+      link.className   = 'file-link';
+      link.textContent = file.webkitRelativePath;
+
+      const output = document.createElement('div');
+      output.className = 'file-output';
+      output.hidden    = true;
+
+      link.addEventListener('click', async () => {
+        if (output.hidden) {
+          if (!output.dataset.parsed) await populateOutput(file, output);
+          output.hidden = false;
+        } else {
+          output.hidden = true;
+        }
+      });
+
+      li.appendChild(link);
+      li.appendChild(output);
+      return li;
+    }
+
+    // Accepts the <ul> element as a parameter (not a global #files query).
+    async function expandAll(listEl) {
+      const btn = document.getElementById('expand-all');
+      btn.disabled = true;
+      const entries = listEl.querySelectorAll('li');
+      for (let i = 0; i < entries.length; i++) {
+        btn.textContent = `Expanding… ${i + 1} / ${entries.length}`;
+        const li     = entries[i];
+        const output = li.querySelector('.file-output');
+        const path   = li.querySelector('.file-link').textContent;
+        if (!output.dataset.parsed) await populateOutput(pdfFiles[path], output);
+        output.hidden = false;
+      }
+      btn.textContent = 'Expand all';
+      btn.disabled    = false;
+    }
+
+    // Returns the summary string (caller places it in #debug-body).
+    function showFilterSummary(total, stubs, dropped, errors, windows = []) {
+      const first       = stubs[0];
+      const last        = stubs[stubs.length - 1];
+      const ignoredList = [...IGNORED].join(', ');
+
+      const lines = [
+        `Total extracted:    ${total}`,
+        `Stubs for analysis: ${stubs.length}`,
+        `Date range:         ${first?.payBeginDate ?? '?'} → ${last?.payEndDate ?? '?'}`,
+        `Ignored types:      ${ignoredList}`,
+      ];
+
+      if (windows.length) {
+        const w0 = windows[0];
+        const wN = windows[windows.length - 1];
+        lines.push('');
+        lines.push(`Candidate windows:  ${windows.length}`);
+        lines.push(`First window:       ${fmtDate(w0.start)} – ${fmtDate(w0.endIncl)}`);
+        lines.push(`Last window:        ${fmtDate(wN.start)} – ${fmtDate(wN.endIncl)}`);
+      }
+
+      const problems = [
+        ...dropped.map(d => `  ${d.file}  (${d.reason})`),
+        ...errors.map(e  => `  ${e.file}  (extraction error: ${e.error})`),
+      ];
+      if (problems.length) {
+        lines.push('', `Problematic files (${problems.length}):`);
+        lines.push(...problems);
+      }
+
+      return lines.join('\n');
     }
 
     // ── State ────────────────────────────────────────────────────
