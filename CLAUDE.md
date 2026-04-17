@@ -32,9 +32,10 @@ Supported params: `plan`, `dob`, `svcYears`, `svcMonths`, `lastDay`, `afc`
 `PLAN.md` is the authoritative spec. Current status:
 - **Stage 1** (scaffold + form + URL params): complete
 - **Stage 2** (directory picker + PDF extraction): complete
-- **Stages 3–12**: not yet started
+- **Stage 3** (plan variant → AFC wiring + UX flow): in progress
+- **Stages 4–13**: not yet started
 
-Stages in order: directory picker + PDF extraction → plan dropdown + AFC computation → manual AFC override → date utilities → pension series table (noncontributory, then all plans) → D3 axes → pension curve → ineligible shading → full form wiring → hover tooltip.
+Stages in order: directory picker + PDF extraction → plan/AFC wiring + UX flow → date utilities → pension series table (noncontributory, then all plans) → D3 axes → pension curve → ineligible shading → full form wiring → hover tooltip.
 
 ## Key Logic
 

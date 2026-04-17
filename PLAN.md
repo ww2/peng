@@ -152,19 +152,20 @@ const serviceAtM = currentSvcMonths + Math.max(0, monthsBetween(today, accrualEn
 
 | Field | Control | Required | Notes |
 |---|---|---|---|
-| Plan variant | Select (5 options) | Yes | Fully specifies rule set and AFC parameters |
+| Plan variant | Select (5 options) | Yes | Must be selected before Earnings data group is enabled |
 | Date of birth | Date input | Yes | Age at each candidate retirement month |
 | Current credited service | Two number inputs (years + months) | Yes | Service as of today; projected forward automatically |
 | Last day of service | Date input | **No** | Leave blank for active employees (ongoing accrual) |
-| Paystub directory | `<input type="file" webkitdirectory>` | Yes* | *Required unless manual AFC override is used |
+| Monthly AFC ($) | Text input | Yes* | *Primary AFC field; scanning populates it automatically |
+| Paystub directory | `<input type="file" webkitdirectory>` | No | Scanning populates Monthly AFC; user may edit afterwards |
 
-AFC is not a user-entered field — it is derived from paystubs and displayed
-as a read-only computed value (e.g. "AFC: $4,413.00/mo — 5 best years, regular
-earnings") before the Calculate button, so the user can sanity-check it.
-
-**Manual AFC override**: a collapsed `<details>` section lets the user type an
-AFC value directly, bypassing the paystub pipeline (useful when paystubs are
-unavailable or incomplete).
+**AFC field behaviour**: scanning runs the DP solver (N windows, mode from plan
+config) and writes `total / N / 12` into the Monthly AFC field. The user can
+edit that value freely before clicking Calculate. If the plan is changed after
+the AFC field has a value, the user is prompted; on confirmation the field is
+recomputed from the already-extracted stubs in memory (no re-scan needed); on
+cancellation the plan dropdown reverts. If the AFC field is empty when the plan
+changes, recomputation happens silently.
 
 ---
 
@@ -177,15 +178,11 @@ unavailable or incomplete).
 │ ║  Service [years] [months] │  Last day [  ][✕] ║│
 │ ╚═══════════════════════════════════════════════╝│
 │                                                  │
-│ ╔═ Earnings data ════════════════════════════════╗│
-│ ║  Paystub directory: [picker]                  ║│
-│ ║  AFC: $X,XXX.XX/mo — 5 best years,            ║│
-│ ║       regular earnings                        ║│
-│ ║  ▸ Show paystub detail / Export JSON          ║│
-│ ║                                               ║│
+│ ╔═ Earnings data (disabled until plan selected) ═╗│
+│ ║  Monthly AFC ($): [_______]                   ║│
 │ ║  ────────────── or ──────────────             ║│
-│ ║                                               ║│
-│ ║  Monthly AFC ($): [__________]                ║│
+│ ║  Paystub dir: [btn] …/name │ ▸ Show detail…  ║│
+│ ║  [scan status]             │   [debug panel]  ║│
 │ ╚═══════════════════════════════════════════════╝│
 ├─────────────────────────────────────────────────┤
 │  [Calculate ▶]  Status line (errors / warnings)  │
@@ -196,11 +193,10 @@ unavailable or incomplete).
 └─────────────────────────────────────────────────┘
 ```
 
-**Calculate button** is disabled until:
-- Group 1: plan variant selected AND date of birth entered
-- Group 2: AFC computed from paystubs OR manual AFC value > 0
-
-When both Group 2 options are filled, the manual AFC value takes precedence.
+**Fieldset enable/disable sequence**:
+1. "Your information" is always enabled
+2. "Earnings data" is disabled (greyed, non-interactive) until plan variant is selected
+3. Calculate button is disabled until the Monthly AFC field has a value > 0 AND DOB is entered
 
 ---
 
@@ -282,29 +278,39 @@ paper checks and stubs with missing dates are absent from the output
 
 ---
 
-### Stage 3: Plan variant dropdown + computed AFC
-**Goal**: Add the plan variant dropdown; after extraction runs, call `afcParams`
-to select N and mode, run the DP solver, compute `afcMonthly = total / N / 12`,
-and display it inline (e.g. "AFC: $4,413.00/mo — 5 best years, regular earnings")
+### Stage 3: Plan variant → AFC wiring + UX flow
+**Goal**: Complete the plan-first UX flow:
+- Swap fieldset order: "Your information" above "Earnings data"
+- Disable the "Earnings data" fieldset until a plan variant is selected
+- `PLAN_CONFIGS` (already defined), `computeAndFillAfc()` (already implemented):
+  after scanning, run DP solver with plan's N and mode, write result into
+  `#manual-afc`; also fires when plan dropdown changes
+- Plan change with non-empty AFC field: prompt user; if confirmed recompute AFC
+  from `lastStubs`/`lastWindows` in memory; if cancelled revert the dropdown
+- Plan change with empty AFC field: recompute silently (nothing to lose)
+- Calculate button enabled when DOB is entered AND Monthly AFC field has a value > 0
+
+**Already done**: `PLAN_CONFIGS`, `computeAndFillAfc()`, `lastStubs`/`lastWindows`
+storage, plan dropdown listener, AFC written to `#manual-afc` after scan.
+
+**Remaining**: fieldset order swap, earnings data disabled until plan selected,
+plan-change prompt + revert-on-cancel.
+
 **Verify**:
-- `hybrid-post2012` → N=5, regular; `hybrid-pre2012` → N=3, total
-- `noncontributory` → N=3, total
-- Switching the dropdown after extraction immediately updates the displayed AFC
-**Status**: Not Started
+- On load, "Earnings data" fieldset is greyed and non-interactive
+- Selecting a plan enables "Earnings data"
+- Scanning populates Monthly AFC; `hybrid-post2012` → N=5 regular,
+  `hybrid-pre2012` → N=3 total, `noncontributory` → N=3 total
+- Changing plan with a value in AFC field shows a confirmation prompt;
+  confirming rewrites the field using in-memory stubs; cancelling restores
+  the previous plan in the dropdown
+- Changing plan with empty AFC field rewrites silently
+- Calculate button remains disabled until DOB is entered and AFC field has a value
+**Status**: In Progress
 
 ---
 
-### Stage 4: Manual AFC override
-**Goal**: Add a collapsed `<details>` block containing a number input; when a
-value is entered it replaces the computed AFC everywhere downstream; clearing it
-restores the computed value
-**Verify**: Enter an override; confirm the displayed AFC line changes to show
-the override value. Clear it; confirm the computed value returns
-**Status**: Not Started
-
----
-
-### Stage 5: Date and service utility functions
+### Stage 4: Date and service utility functions
 **Goal**: Implement and inline-test three pure functions:
 - `monthsBetween(a, b)` — whole calendar months from Date a to Date b
 - `fractionalAge(dob, date)` — age in fractional years
@@ -319,7 +325,7 @@ boundaries (e.g. same day next month = exactly 1 month)
 
 ---
 
-### Stage 6: Pension series for Noncontributory (table output)
+### Stage 5: Pension series for Noncontributory (table output)
 **Goal**: Implement `calculateSeries(params)` for `noncontributory` only;
 render output as a plain HTML table — one row per candidate month showing:
 retirement date | service months | whole age | status (normal/early/ineligible) | pension
@@ -333,7 +339,7 @@ retirement date | service months | whole age | status (normal/early/ineligible) 
 
 ---
 
-### Stage 7: Pension series for all plan variants (table output)
+### Stage 6: Pension series for all plan variants (table output)
 **Goal**: Extend `calculateSeries` to cover all five plan variants; table
 updates when the plan dropdown changes
 **Verify**:
@@ -347,7 +353,7 @@ updates when the plan dropdown changes
 
 ---
 
-### Stage 8: D3 axes (no data)
+### Stage 7: D3 axes (no data)
 **Goal**: Replace the chart placeholder with a real SVG; render X and Y axes
 with correct tick structure but hardcoded ranges (X: $0–$5,000; Y: today to
 today+15 years)
@@ -358,18 +364,27 @@ other month; earlier dates at the bottom; no data yet
 
 ---
 
-### Stage 9: Pension curve + dynamic axis ranges
-**Goal**: Feed `calculateSeries` output into the chart; drive axis ranges from
-the data (X max rounded up to nearest $1,000; Y from first candidate month to
-10 years past earliest normal retirement date); draw the line with gaps at null
-**Verify**: Staircase steps clearly visible in early retirement window; line
-resumes after each step; line absent (gap) for ineligible months; service-driven
-upward slope visible for active employees; axis ranges fit the data
+### Stage 8a: Pension curve (hardcoded ranges)
+**Goal**: Feed `calculateSeries` output into the chart as a `d3.line()` over the
+hardcoded axes from Stage 7; use `line.defined(d => d.pension !== null)` for gaps
+**Verify**: Line visible over existing axes; staircase steps clearly visible in
+early retirement window; line resumes after each step; line absent (gap) for
+ineligible months; service-driven upward slope visible for active employees
 **Status**: Not Started
 
 ---
 
-### Stage 10: Ineligible region shading
+### Stage 8b: Dynamic axis ranges
+**Goal**: Replace hardcoded axis ranges with data-driven ones — X max rounded up
+to nearest $1,000; Y from first candidate month to 10 years past earliest normal
+retirement date
+**Verify**: Axis ranges update when inputs change; X max tracks the highest
+pension value; Y bounds are tight to the data; staircase and gaps still correct
+**Status**: Not Started
+
+---
+
+### Stage 9: Ineligible region shading
 **Goal**: Add a shaded `<rect>` covering the Y range of ineligible months
 behind the curve, with a "Not yet eligible" label
 **Verify**: Shading covers exactly the ineligible date range and stops where
@@ -378,21 +393,29 @@ the curve begins; label readable; curve renders on top of shading
 
 ---
 
-### Stage 11: Full form wiring + Calculate button
+### Stage 10a: Full form wiring + Calculate button
 **Goal**: Wire all form inputs (plan variant, DOB, service years/months, last
-day of service) to `calculateSeries`; Calculate button renders the chart;
-remove the debug series table from stages 6–7; add a status line that shows
-validation errors or "No eligible retirement dates found" when the series is empty
+day of service) to `calculateSeries`; Calculate button renders the chart; debug
+series table from Stages 5–6 remains visible for cross-checking
 **Verify**:
 - Changing any input and clicking Calculate updates the chart
-- Missing required fields show a clear error instead of a broken chart
 - Blank "last day of service" → active-employee accrual; filled date → service caps
+**Status**: Not Started
+
+---
+
+### Stage 10b: Remove debug table + status line
+**Goal**: Remove the debug series table; add a status line showing validation
+errors or "No eligible retirement dates found" when the series is empty
+**Verify**:
+- Debug table is gone; chart is the only output
+- Missing required fields show a clear error instead of a broken chart
 - "No eligible dates found" appears for implausible inputs (e.g., DOB = today)
 **Status**: Not Started
 
 ---
 
-### Stage 12: Hover tooltip
+### Stage 11: Hover tooltip
 **Goal**: On mouse move over the chart, draw vertical + horizontal crosshair
 lines snapped to the nearest data point and show a label ("May 2031 — $2,847/mo")
 **Verify**: Tooltip appears on hover; snaps correctly to data points; disappears
@@ -408,10 +431,10 @@ when mouse leaves the chart area; label text is correctly formatted
 | Plan input | Single 5-option dropdown | One control fully specifies rules + AFC params; no ambiguity for Noncontributory |
 | Service accrual | Ongoing by default | Primary audience is active employees; later retirement = more service + higher pension |
 | Last day of service | Optional date input, blank = active | Covers separation/modelling use cases without cluttering the common case |
-| AFC source | Derived from paystubs | Replaces manual entry; primary goal of the project |
-| AFC display | Shown inline before Calculate | User can sanity-check before drawing chart |
-| Manual AFC entry | Peer option in Group 2 alongside paystub picker | Equal alternative, not a fallback; manual value takes precedence when both are set |
+| AFC source | Scanning populates Monthly AFC field | Replaces manual entry in the common case; user can edit the value before drawing |
+| AFC field | Single editable text input | Scanning fills it; user may override; Calculate requires it to be non-empty |
 | AFC parameters | Auto-selected from plan variant | User shouldn't need to know ERS rules; single source of truth |
+| Plan-change prompt | Confirm before overwriting non-empty AFC | Prevents silent loss of a manually edited value; recomputes from in-memory stubs on confirm |
 | AFC monthly | dpTotal / N / 12 | DP total is sum of annual earnings; pension formula needs monthly |
 | Chart library | D3.js v7 (inlined) | Full axis control; SVG resolution-independent; `line.defined()` handles gaps |
 | Multiple curves | Single curve | No use case expressed for overlays |

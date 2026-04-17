@@ -41,6 +41,7 @@
 
     .field { display: flex; flex-direction: column; gap: 0.2rem; }
     .field label { font-size: 0.8rem; color: #555; }
+    #picker-path { color: #999; }
     .field select,
     .field input[type="date"],
     .field input[type="number"] {
@@ -55,6 +56,19 @@
 
     .field-pair { display: flex; gap: 0.5rem; }
     .field-pair .field { flex: 1; }
+
+    /* ── Manual AFC field ── */
+    #group-earnings-input-manual .field { flex-direction: row; align-items: center; }
+    #manual-afc { width: 9ch; }
+
+    /* ── Picker two-column layout ── */
+    #group-earnings-input-picker {
+      display: grid;
+      grid-template-columns: 1fr 1px 1fr;
+      gap: 0 1rem;
+      align-items: start;
+    }
+    .col-divider { background: #ccc; align-self: stretch; }
 
     /* ── Group 2 stacked layout ── */
     .or-divider {
@@ -76,7 +90,7 @@
     }
 
     /* ── AFC computed display ── */
-    #afc-computed, #afc-date-range, #picker-count {
+    #afc-computed, #afc-date-range {
       margin-top: 0.5rem;
       font-size: 0.85rem;
       min-height: 1.2em;
@@ -91,6 +105,7 @@
       user-select: none;
     }
     details summary:hover { color: #004499; }
+    details.disabled { pointer-events: none; opacity: 0.35; }
     .details-body { margin-top: 0.4rem; }
 
     /* ── Action row ── */
@@ -128,9 +143,14 @@
     .toggle-rows { margin: 0.25rem 0; font-size: 0.8rem; cursor: pointer;
                    color: #0066cc; background: none; border: none; padding: 0;
                    text-decoration: underline; }
+    .debug-count { display: flex; justify-content: space-between; align-items: baseline;
+                   margin: 0.25rem 0; font-size: 0.8rem; }
     .dump-out { background: #f0f0f0; border: 1px solid #bbb; padding: 0.5rem;
                 margin: 0; overflow: auto; max-height: 300px;
                 font-size: 0.75rem; white-space: pre; }
+    .filter-summary { font-family: monospace; font-size: 0.8rem; }
+    .filter-summary pre { margin: 0; }
+    .filter-summary ul { margin: 0; padding-left: 2em; }
     #files { list-style: none; padding: 0; margin: 0.5rem 0 0; }
     #files > li { margin: 0.15rem 0; }
     .file-link { cursor: pointer; color: #0066cc; text-decoration: underline; }
@@ -146,22 +166,34 @@
   <p id="reload-bar"><a id="reload-link" href="#">Reload</a></p>
 
   <!-- ── Group 2: Earnings data ───────────────────────────────── -->
-  <fieldset id="group-2">
+  <fieldset id="group-earnings-input">
     <legend>Earnings data</legend>
 
-    <!-- Option A: paystub directory -->
-    <div id="group-2a">
+    <!-- Option B: manual AFC -->
+    <div id="group-earnings-input-manual">
       <div class="field">
-        <label for="picker-btn">Paystub directory</label>
-        <div>
-          <button id="picker-btn" type="button">Choose directory…</button>
-          <input type="file" id="picker" webkitdirectory accept=".pdf" style="display:none">
-        </div>
-        <div id="picker-count"></div>
+        <label for="manual-afc">Monthly AFC ($)</label>
+        <input type="text" inputmode="decimal" id="manual-afc" placeholder="e.g. 4413.00">
       </div>
-      <div id="afc-computed"></div>
-      <div id="afc-date-range"></div>
-      <details id="debug-details">
+    </div>
+
+    <div class="or-divider">or</div>
+
+    <!-- Option A: paystub directory -->
+    <div id="group-earnings-input-picker">
+      <div id="picker-controls">
+        <div class="field">
+          <label for="picker-btn">Paystub directory<span id="picker-path"></span></label>
+          <div>
+            <button id="picker-btn" type="button">Choose directory…</button>
+            <input type="file" id="picker" webkitdirectory accept=".pdf" style="display:none">
+          </div>
+        </div>
+        <div id="afc-computed"></div>
+        <div id="afc-date-range"></div>
+      </div>
+      <div class="col-divider"></div>
+      <details id="debug-details" class="disabled">
         <summary>Show paystub detail / Export JSON</summary>
         <div class="details-body" id="debug-body">
           <!-- populated in Stage 2 -->
@@ -169,20 +201,10 @@
       </details>
     </div>
 
-    <div class="or-divider">or</div>
-
-    <!-- Option B: manual AFC -->
-    <div id="group-2b">
-      <div class="field">
-        <label for="manual-afc">Monthly AFC ($)</label>
-        <input type="text" inputmode="decimal" id="manual-afc" placeholder="e.g. 4413.00">
-      </div>
-    </div>
-
   </fieldset>
 
   <!-- ── Group 1: Your information ───────────────────────────── -->
-  <fieldset id="group-1">
+  <fieldset id="group-plan-input">
     <legend>Your information</legend>
     <div class="field-grid">
 
@@ -240,8 +262,19 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
 
+    // ── Plan configs ─────────────────────────────────────────────
+    const PLAN_CONFIGS = {
+      'hybrid-post2012':       { multiplier: 0.0175, N: 5, mode: 'regular' },
+      'hybrid-pre2012':        { multiplier: 0.0200, N: 3, mode: 'total'   },
+      'contributory-post2012': { multiplier: 0.0175, N: 5, mode: 'regular' },
+      'contributory-pre2012':  { multiplier: 0.0200, N: 3, mode: 'total'   },
+      'noncontributory':       { multiplier: 0.0125, N: 3, mode: 'total'   },
+    };
+
     // ── Directory picker ─────────────────────────────────────────
-    let pdfFiles = {};
+    let pdfFiles     = {};
+    let lastStubs    = [];
+    let lastWindows  = [];
 
     document.getElementById('picker-btn').addEventListener('click', () => {
       document.getElementById('picker').click();
@@ -249,7 +282,7 @@
 
     // Some browsers restore file input selections across reloads; clear on load.
     document.getElementById('picker').value = '';
-    document.getElementById('picker-count').textContent = '';
+    document.getElementById('picker-path').textContent = '';
     document.getElementById('afc-date-range').textContent = '';
 
     document.getElementById('picker').addEventListener('change', async function () {
@@ -260,12 +293,15 @@
       pdfFiles = {};
       pdfs.forEach(f => { pdfFiles[f.webkitRelativePath] = f; });
 
-      document.getElementById('picker-count').textContent =
-        `${this.files.length} files selected (${pdfs.length} PDF${pdfs.length !== 1 ? 's' : ''})`;
+      const dirName = pdfs[0]?.webkitRelativePath.split('/')[0] ?? '';
+      document.getElementById('picker-path').textContent = dirName ? `  …/${dirName}` : '';
 
       const afcComputedEl = document.getElementById('afc-computed');
       const debugBody     = document.getElementById('debug-body');
 
+      const debugDetails = document.getElementById('debug-details');
+      debugDetails.open = false;
+      debugDetails.classList.add('disabled');
       afcComputedEl.textContent = 'Extracting…';
       debugBody.innerHTML = '';
 
@@ -292,23 +328,26 @@
       const json    = toJson(output);
 
       // 1. Count line with toggle, expand-all, and download buttons
-      const countP       = document.createElement('p');
+      const countP       = document.createElement('div');
       const toggleBtn    = document.createElement('button');
       const expandAllBtn = document.createElement('button');
       const dlBtn        = document.createElement('button');
 
       toggleBtn.className      = 'toggle-rows';
-      toggleBtn.textContent    = 'show ▶';
+      toggleBtn.textContent    = 'list ▶';
       expandAllBtn.id          = 'expand-all';
       expandAllBtn.textContent = 'Expand all';
       dlBtn.textContent        = 'Download JSON';
 
-      countP.append(
+      countP.className = 'debug-count';
+      const leftSpan  = document.createElement('span');
+      const rightSpan = document.createElement('span');
+      leftSpan.append(
         `${pdfs.length} PDF${pdfs.length !== 1 ? 's' : ''} found (`,
-        toggleBtn, '). ',
-        expandAllBtn, ' ',
-        dlBtn
+        toggleBtn, ')'
       );
+      rightSpan.append(expandAllBtn, ' ', dlBtn);
+      countP.append(leftSpan, rightSpan);
       debugBody.appendChild(countP);
 
       dlBtn.addEventListener('click', () => {
@@ -328,26 +367,29 @@
 
       toggleBtn.addEventListener('click', () => {
         listEl.hidden = !listEl.hidden;
-        toggleBtn.textContent = listEl.hidden ? 'show ▶' : 'hide ▼';
+        toggleBtn.textContent = listEl.hidden ? 'list ▶' : 'hide ▼';
       });
       expandAllBtn.addEventListener('click', () => expandAll(listEl));
 
       // 3. Filter summary
-      const summaryPre = document.createElement('pre');
-      summaryPre.textContent = showFilterSummary(results.length, stubs, dropped, errors, windows);
-      debugBody.appendChild(summaryPre);
+      debugBody.appendChild(showFilterSummary(results.length, stubs, dropped, errors, windows));
 
       // Status lines
       const toYmd = s => { const [m, d, y] = s.split('/'); return `${y}/${m}/${d}`; };
       const first = stubs[0];
       const last  = stubs[stubs.length - 1];
       afcComputedEl.textContent =
-        `${stubs.length} stub${stubs.length !== 1 ? 's' : ''} extracted · select a plan to compute AFC`;
+        `${stubs.length} stub${stubs.length !== 1 ? 's' : ''} extracted`;
       document.getElementById('afc-date-range').textContent = (first && last)
         ? `Paystubs from ${toYmd(first.payBeginDate)} to ${toYmd(last.payEndDate)}`
         : '';
 
+      lastStubs   = stubs;
+      lastWindows = windows;
+
+      debugDetails.classList.remove('disabled');
       window.afcComputed = null;
+      computeAndFillAfc();
       updateCalcBtn();
     });
 
@@ -682,6 +724,20 @@
       return { selected, total: bestTotal };
     }
 
+    // ── AFC computation ──────────────────────────────────────────
+    function computeAndFillAfc() {
+      const config = PLAN_CONFIGS[document.getElementById('plan').value];
+      if (!config || !lastWindows.length) return;
+      const scored = lastWindows.map(w => ({
+        ...w,
+        score: w.stubs.reduce((sum, s) => sum + scoreStub(s, config.mode), 0),
+      }));
+      const result = solveDP(scored, config.N);
+      if (!result) return;
+      document.getElementById('manual-afc').value = (result.total / config.N / 12).toFixed(2);
+      updateCalcBtn();
+    }
+
     // ── Display helpers ──────────────────────────────────────────
     // Serialize to JSON with monetary values formatted to exactly 2 decimal places,
     // matching Groovy's BigDecimal serialization (e.g. 4413.00 not 4413).
@@ -807,26 +863,34 @@
       btn.disabled    = false;
     }
 
-    // Returns the summary string (caller places it in #debug-body).
+    // Returns a DOM element placed into #debug-body.
     function showFilterSummary(total, stubs, dropped, errors, windows = []) {
-      const first       = stubs[0];
-      const last        = stubs[stubs.length - 1];
-      const ignoredList = [...IGNORED].join(', ');
+      const wrapper = document.createElement('div');
+      wrapper.className = 'filter-summary';
 
-      const lines = [
-        `Total extracted:    ${total}`,
-        `Stubs for analysis: ${stubs.length}`,
-        `Date range:         ${first?.payBeginDate ?? '?'} → ${last?.payEndDate ?? '?'}`,
-        `Ignored types:      ${ignoredList}`,
-      ];
+      const topPre = document.createElement('pre');
+      topPre.textContent = [
+        `Total processed:    ${total}`,
+        `Ignored types:`,
+      ].join('\n');
+      wrapper.appendChild(topPre);
 
+      const ul = document.createElement('ul');
+      for (const t of IGNORED) {
+        const li = document.createElement('li');
+        li.textContent = t;
+        ul.appendChild(li);
+      }
+      wrapper.appendChild(ul);
+
+      const tailLines = [];
       if (windows.length) {
         const w0 = windows[0];
         const wN = windows[windows.length - 1];
-        lines.push('');
-        lines.push(`Candidate windows:  ${windows.length}`);
-        lines.push(`First window:       ${fmtDate(w0.start)} – ${fmtDate(w0.endIncl)}`);
-        lines.push(`Last window:        ${fmtDate(wN.start)} – ${fmtDate(wN.endIncl)}`);
+        tailLines.push('');
+        tailLines.push(`Candidate windows:  ${windows.length}`);
+        tailLines.push(`First window:       ${fmtDate(w0.start)} – ${fmtDate(w0.endIncl)}`);
+        tailLines.push(`Last window:        ${fmtDate(wN.start)} – ${fmtDate(wN.endIncl)}`);
       }
 
       const problems = [
@@ -834,11 +898,17 @@
         ...errors.map(e  => `  ${e.file}  (extraction error: ${e.error})`),
       ];
       if (problems.length) {
-        lines.push('', `Problematic files (${problems.length}):`);
-        lines.push(...problems);
+        tailLines.push('', `Problematic files (${problems.length}):`);
+        tailLines.push(...problems);
       }
 
-      return lines.join('\n');
+      if (tailLines.length) {
+        const tailPre = document.createElement('pre');
+        tailPre.textContent = tailLines.join('\n');
+        wrapper.appendChild(tailPre);
+      }
+
+      return wrapper;
     }
 
     // ── State ────────────────────────────────────────────────────
@@ -860,6 +930,7 @@
     ['plan', 'dob', 'svc-years', 'svc-months', 'manual-afc'].forEach(id =>
       document.getElementById(id).addEventListener('input', updateCalcBtn)
     );
+    document.getElementById('plan').addEventListener('input', computeAndFillAfc);
 
     // ── Last-day-of-service clear button ─────────────────────────
     document.getElementById('last-day-clear').addEventListener('click', () => {
