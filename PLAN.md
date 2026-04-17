@@ -32,15 +32,6 @@ Contains working implementations of:
 - `scoreStub(stub, mode)` — computes stub score ('regular' or 'total')
 - `fmtDate`, `parseDate`, `addMonths`, `addDays` — date utilities
 
-### PREV-PLAN.md (design spec, not yet built)
-
-Defines:
-- Plan rules (Hybrid, Contributory, Noncontributory; pre/post-2012 variants)
-- Eligibility logic per retirement month
-- Pension formula with early-retirement penalty
-- Graph specification (D3, axes, ticks, tooltip, orientation)
-- CLI harness spec (Groovy `graphret`)
-
 ---
 
 ## Pension Calculation Formula
@@ -97,27 +88,38 @@ AFC monthly = DP total / N / 12 (DP total is sum of annual earnings across N win
 | Rule | Membership post-2012 | Membership pre-2012 |
 |---|---|---|
 | Multiplier | 1.75% | 2.00% |
+| AFC basis | avg 5-highest base-pay years (regular earnings) | avg 3-highest gross years (total earnings) |
 | Normal retirement | Age 65 w/10 yos OR Age 60 w/30 yos | Age 62 w/5 yos OR Age 55 w/30 yos |
+| Normal ret. age for penalty | 65 (or 60 once 30 yos met first) | 62 (or 55 once 30 yos met first) |
 | Early retirement | Age 55 w/20 yos | Age 55 w/20 yos |
 | Early penalty | 6%/yr below normal age | 6%/yr below normal age |
+| Vesting | 10 yos | 5 yos |
+| Post-retirement increase | 1.5%/yr | 2.5%/yr |
 
 ### Contributory Plan (General Employees)
 
 | Rule | Membership post-2012 | Membership pre-2012 |
 |---|---|---|
 | Multiplier | 1.75% | 2.00% |
+| AFC basis | avg 5-highest base-pay years (regular earnings) | avg 3-highest gross years (total earnings) |
 | Normal retirement | Age 60 w/10 yos | Age 55 w/5 yos |
+| Normal ret. age for penalty | 60 | 55 |
 | Early retirement | Age 55 w/25 yos | Any age w/25 yos |
 | Early penalty | 6%/yr below normal age | 6%/yr below age 55 |
+| Vesting | 10 yos | 5 yos |
+| Post-retirement increase | 1.5%/yr | 2.5%/yr |
 
 ### Noncontributory Plan
 
 | Rule | Value |
 |---|---|
 | Multiplier | 1.25% |
+| AFC basis | avg 3-highest gross years (total earnings) |
 | Normal retirement | Age 62 w/10 yos OR Age 55 w/30 yos |
+| Normal ret. age for penalty | 62 (or 55 once 30 yos met first) |
 | Early retirement | Age 55 w/20–29 yos |
-| Early penalty | 6%/yr below age 62 |
+| Early penalty | 6%/yr below age 62 (explicitly stated in PDFs) |
+| Post-retirement increase | 2.5%/yr |
 
 ---
 
@@ -239,8 +241,13 @@ When both Group 2 options are filled, the manual AFC value takes precedence.
 - Lower bound: 1st of next calendar month
 - Upper bound: earliest normal retirement date + 10 years (or today + 10 years
   if already past normal eligibility)
+- Orientation: earlier dates at **bottom**, later dates at **top** — curve slopes
+  up-right naturally (retire later → higher pension)
 - Major ticks: Jan 1 each year, labeled with 4-digit year
 - Minor ticks: 1st of every other month, unlabeled
+
+Both axes use `axis.tickValues()` with two separate `<g>` tick layers (one for
+major, one for minor) to achieve independent label and length control.
 
 **Plot**:
 - `d3.line()` with `line.defined(d => d.pension !== null)` — gaps for ineligible months
@@ -433,7 +440,9 @@ when mouse leaves the chart area; label text is correctly formatted
 | Age penalty | 6%/yr below normal retirement age | Consistent across all plans per PDFs |
 | Penalty granularity | Whole years (floor) | PDFs say "each year under age 62" — no monthly pro-ration; produces staircase curve |
 | Retirement option | Maximum Allowance only | Survivor reductions require actuarial factors not in source docs |
-| Mixed service | Not supported | Additive formula known; deferred to follow-on |
+| Plan scope | All three plans (5 variants) | Minimal added complexity; maximises usefulness |
+| Mixed service | Not supported — **most likely to change** | Additive formula known; at least one intended user has mixed Hybrid+Noncontributory service; deferred to follow-on |
+| Y-axis orientation | Earlier dates at bottom | Curve slopes up-right naturally; matches conventional graph reading direction |
 | CLI harness | Removed | Paystub directory can't be passed via URL; limited value |
 | Delivery | Single HTML file | No server, no install; works offline from `file://` |
 | Debug UI | Collapsed by default | Keep for troubleshooting; not in main flow |
