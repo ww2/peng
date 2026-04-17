@@ -2,49 +2,91 @@
 
 ## Purpose
 
-A browser-based application that plots **monthly pension at retirement (X) vs. retirement date (Y)**
-for a Hawaii ERS member. The user enters inputs via an HTML form; the app calculates
-the Maximum Allowance pension for every eligible retirement month and plots the curve.
+A single `index.html` file that:
+1. Accepts a directory of PDF paystubs (via directory picker)
+2. Extracts earnings data from each paystub using pdf.js
+3. Automatically calculates the AFC (Average Final Compensation) appropriate
+   to the user's plan type and membership date
+4. Plots **monthly pension (X) vs. retirement date (Y)** for every eligible
+   month from now through 10 years past the member's normal retirement date
 
-Delivered as:
-- A single `index.html` file (HTML + inlined JS + inlined CSS) that works standalone
-  in any browser, including from `file://` with no server
-- An optional Groovy CLI harness (`graphret`) that accepts input params, constructs a
-  `file://` URL with query parameters, and opens `index.html` in the default browser
-  with the graph pre-calculated
+Works standalone from `file://` with no server.
 
 ---
 
-## Source Documents
+## What Already Exists
 
-- `Retirement-Information-Hybrid-eff.-6.2022.pdf`
-- `Retirement-Information-Noncontributory-eff.-6.2022.pdf`
-- `Retirement-Information-Contrib-eff.-6.2022.pdf`
-- `ContribHybrid201205.pdf`
-- `ContribGeneral201205.pdf`
-- `Noncontributory200912.pdf`
-- `act-163-relating-to-employees-retirement-system.pdf`
+### afc.html (complete, import as-is)
+
+Contains working implementations of:
+
+- `reconstructRows(allItems)` — groups PDF text items into rows by Y-coordinate
+- `parseHeader(rows)` — extracts pay dates, document type, document number
+- `findEarningsBlock(rows)` — locates HOURS AND EARNINGS section boundaries
+- `parseEarnings(rows, headerIdx, totalIdx)` — extracts currentEarnings / ytdEarnings
+- `extractPaystub(file)` — full per-file pipeline
+- `ALIASES`, `KNOWN`, `IGNORED` — earning-type taxonomy
+- `filterStubs(paystubs)` — drops paper checks and stubs with missing dates
+- `generateWindows(stubs)` — generates candidate 12-month windows
+- `solveDP(windows, N)` — DP solver: picks best N non-overlapping windows by score
+- `scoreStub(stub, mode)` — computes stub score ('regular' or 'total')
+- `fmtDate`, `parseDate`, `addMonths`, `addDays` — date utilities
+
+### PREV-PLAN.md (design spec, not yet built)
+
+Defines:
+- Plan rules (Hybrid, Contributory, Noncontributory; pre/post-2012 variants)
+- Eligibility logic per retirement month
+- Pension formula with early-retirement penalty
+- Graph specification (D3, axes, ticks, tooltip, orientation)
+- CLI harness spec (Groovy `graphret`)
 
 ---
 
 ## Pension Calculation Formula
 
 ```
-Monthly Pension (Maximum Allowance) = Multiplier × Years_of_Credited_Service × AFC_monthly
+pension = multiplier × (serviceAtM / 12) × AFC × factor
+factor  = max(0.0, 1.0 - 0.06 × yearsEarly)
+yearsEarly = max(0, normalRetirementAge - ageAtM)   -- whole years (floor)
 ```
 
-Early retirement penalty (fractional years, smooth curve):
-```
-years_early = normal_retirement_age - exact_age_at_retirement_month
-factor      = max(0.0, 1.0 - 0.06 × years_early)
-pension     = multiplier × (service_months / 12) × AFC × factor
+`ageAtM` is computed in **whole years** (floor of fractional age) for the penalty
+calculation, matching the PDFs' "6% for each year under age 62" language. This
+produces a staircase curve in the early retirement window: flat between birthdays,
+stepping down 6% on each birthday.
+
+`serviceAtM / 12` may still be fractional (months of credited service matter for
+the pension amount; only the penalty uses whole years).
+
+AFC is a **monthly** dollar amount derived automatically from paystubs.
+
+---
+
+## Plan Variant Dropdown
+
+A single dropdown replaces separate "plan type" and "membership date" controls.
+Five options fully specify the rule set and AFC parameters with no additional input:
+
+| Value | Label | N windows | Earnings mode |
+|---|---|---|---|
+| `hybrid-post2012` | Hybrid (joined July 2012 or later) | 5 | regular (base pay only) |
+| `hybrid-pre2012` | Hybrid (joined before July 2012) | 3 | total (all non-ignored) |
+| `contributory-post2012` | Contributory (joined July 2012 or later) | 5 | regular (base pay only) |
+| `contributory-pre2012` | Contributory (joined before July 2012) | 3 | total (all non-ignored) |
+| `noncontributory` | Noncontributory | 3 | total (all non-ignored) |
+
+```js
+const PLAN_CONFIGS = {
+  'hybrid-post2012':      { multiplier: 0.0175, N: 5, mode: 'regular', ... },
+  'hybrid-pre2012':       { multiplier: 0.0200, N: 3, mode: 'total',   ... },
+  'contributory-post2012':{ multiplier: 0.0175, N: 5, mode: 'regular', ... },
+  'contributory-pre2012': { multiplier: 0.0200, N: 3, mode: 'total',   ... },
+  'noncontributory':      { multiplier: 0.0125, N: 3, mode: 'total',   ... },
+};
 ```
 
-`exact_age_at_retirement_month` is computed in fractional years (months of precision),
-giving a smooth continuous curve through the early-retirement window rather than a
-staircase. This is intentional — the graph is a planning tool, not an official estimate.
-
-AFC is entered by the user as a monthly dollar amount and treated as fixed.
+AFC monthly = DP total / N / 12 (DP total is sum of annual earnings across N windows).
 
 ---
 
@@ -52,160 +94,325 @@ AFC is entered by the user as a monthly dollar amount and treated as fixed.
 
 ### Hybrid Plan
 
-| Rule | Membership after Jun 30 2012 | Membership before Jul 1 2012 |
+| Rule | Membership post-2012 | Membership pre-2012 |
 |---|---|---|
 | Multiplier | 1.75% | 2.00% |
-| AFC basis | avg 5-highest base-pay years | avg 3-highest gross years |
-| Normal retirement | Age 65 w/10 yos **or** Age 60 w/30 yos | Age 62 w/5 yos **or** Age 55 w/30 yos |
+| Normal retirement | Age 65 w/10 yos OR Age 60 w/30 yos | Age 62 w/5 yos OR Age 55 w/30 yos |
 | Early retirement | Age 55 w/20 yos | Age 55 w/20 yos |
-| Normal retirement age (for penalty) | 65 (or 60 if 30 yos met first) | 62 (or 55 if 30 yos met first) |
-| Early retirement penalty | 6% per year below normal retirement age | 6% per year below normal retirement age |
-| Vesting | 10 yos | 5 yos |
-| Post-retirement increase | 1.5%/yr | 2.5%/yr |
+| Early penalty | 6%/yr below normal age | 6%/yr below normal age |
 
 ### Contributory Plan (General Employees)
 
-| Rule | Membership after Jun 30 2012 | Membership before Jul 1 2012 |
+| Rule | Membership post-2012 | Membership pre-2012 |
 |---|---|---|
 | Multiplier | 1.75% | 2.00% |
-| AFC basis | avg 5-highest base-pay years | avg 3-highest gross years |
 | Normal retirement | Age 60 w/10 yos | Age 55 w/5 yos |
 | Early retirement | Age 55 w/25 yos | Any age w/25 yos |
-| Normal retirement age (for penalty) | 60 | 55 |
-| Early retirement penalty | 6% per year below normal retirement age | 6% per year below normal retirement age |
-| Vesting | 10 yos | 5 yos |
-| Post-retirement increase | 1.5%/yr | 2.5%/yr |
+| Early penalty | 6%/yr below normal age | 6%/yr below age 55 |
 
 ### Noncontributory Plan
 
 | Rule | Value |
 |---|---|
 | Multiplier | 1.25% |
-| AFC basis | avg 3-highest years |
-| Normal retirement | Age 62 w/10 yos **or** Age 55 w/30 yos |
+| Normal retirement | Age 62 w/10 yos OR Age 55 w/30 yos |
 | Early retirement | Age 55 w/20–29 yos |
-| Normal retirement age (for penalty) | 62 (or 55 if 30 yos met first) |
-| Early retirement penalty | 6% per year below age 62 (explicitly stated in PDFs) |
-| Post-retirement increase | 2.5%/yr |
+| Early penalty | 6%/yr below age 62 |
 
 ---
 
-## Eligibility Logic (per candidate retirement month M)
+## Service Accrual
 
-1. `ageAtM` — exact fractional age derived from DOB and M (months precision)
-2. `serviceAtM` — current credited service (months) + months elapsed from today to M
+Active employees are the primary audience. The default assumption is that
+service keeps accruing month-by-month until the retirement date itself — this
+makes the curve naturally steeper for later retirement dates, capturing both the
+higher multiplier and the longer service.
+
+An optional **"Last day of service"** date input covers the non-default cases
+(already retired, planning a specific separation date, or modelling a break in
+service). When left blank, service accrues through the retirement date.
+
+```js
+// today        = current date (runtime)
+// lastDayOfSvc = optional Date from form input; null = still active
+// retDate      = candidate retirement month (1st of that month)
+// currentSvcMonths = credited service as of today (from form)
+
+const accrualEnd = lastDayOfSvc
+  ? new Date(Math.min(lastDayOfSvc.getTime(), retDate.getTime()))
+  : retDate;
+const serviceAtM = currentSvcMonths + Math.max(0, monthsBetween(today, accrualEnd));
+```
+
+`monthsBetween` counts whole calendar months (same day-of-month logic as
+`addMonths` already in afc.html).
+
+---
+
+## Eligibility Logic (per candidate month M)
+
+1. `ageAtM` — DOB to M in fractional years (months precision)
+2. `serviceAtM` — see Service Accrual above
 3. Determine status:
-   - **Normal**: meets either normal age+service threshold → no penalty
-   - **Early**: meets early age+service threshold but not yet normal → apply penalty
-   - **Ineligible**: neither met → no point plotted
-4. For plans with two normal thresholds (e.g., 65/10 or 60/30): the first threshold
-   met determines when the penalty ends; use the lower normal retirement age for
-   penalty calculation once the higher service count is reached
-5. `factor = Math.max(0, 1 - 0.06 * (normalRetirementAge - ageAtM))` (only when early)
-6. `pension = multiplier * (serviceAtM / 12) * afc * factor`
+   - **Normal**: meets either normal threshold → factor = 1.0
+   - **Early**: meets early threshold but not normal → apply 6% penalty
+   - **Ineligible**: neither met → pension = null (gap in chart)
+4. Dual normal thresholds (65/10 or 60/30): whichever is met first ends
+   the penalty; use the lower normal age for penalty once higher service
+   count is reached
+5. `yearsEarly = Math.max(0, normalRetAge - Math.floor(ageAtM))`
+   `factor = Math.max(0, 1 - 0.06 * yearsEarly)`
+6. `pension = multiplier * (serviceAtM / 12) * afcMonthly * factor`
 
 ---
 
-## Inputs
+## Inputs (HTML Form)
 
-### HTML Form (manual use)
+| Field | Control | Required | Notes |
+|---|---|---|---|
+| Plan variant | Select (5 options) | Yes | Fully specifies rule set and AFC parameters |
+| Date of birth | Date input | Yes | Age at each candidate retirement month |
+| Current credited service | Two number inputs (years + months) | Yes | Service as of today; projected forward automatically |
+| Last day of service | Date input | **No** | Leave blank for active employees (ongoing accrual) |
+| Paystub directory | `<input type="file" webkitdirectory>` | Yes* | *Required unless manual AFC override is used |
 
-| Field | Control | Notes |
-|---|---|---|
-| Plan type | Dropdown | Hybrid / Contributory / Noncontributory |
-| Membership date | Date input | Determines pre/post-2012 rule set |
-| Date of birth | Date input | Used to compute age at each future date |
-| Current credited service | Two number inputs (years + months) | Projected forward from today |
-| AFC (monthly $) | Number input | Treated as fixed |
+AFC is not a user-entered field — it is derived from paystubs and displayed
+as a read-only computed value (e.g. "AFC: $4,413.00/mo — 5 best years, regular
+earnings") before the Calculate button, so the user can sanity-check it.
 
-### URL Query Parameters (CLI / pre-fill)
-
-| Param | Example |
-|---|---|
-| `plan` | `hybrid`, `contributory`, `noncontributory` |
-| `membershipDate` | `2015-03-01` |
-| `dob` | `1975-06-15` |
-| `serviceYears` | `11` |
-| `serviceMonths` | `4` |
-| `afc` | `4500` |
-
-If all params are present and valid on load, the form is pre-filled and the chart
-rendered immediately without user interaction.
+**Manual AFC override**: a collapsed `<details>` section lets the user type an
+AFC value directly, bypassing the paystub pipeline (useful when paystubs are
+unavailable or incomplete).
 
 ---
 
 ## Layout
 
 ```
-┌─────────────────────────────────────┐
-│  [Form: 5 inputs]  [Calculate]      │
-├─────────────────────────────────────┤
-│  Status line (errors / warnings)    │
-├─────────────────────────────────────┤
-│                                     │
-│  D3 SVG chart                       │
-│                                     │
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│ ╔═ Your information ════════════════════════════╗│
+│ ║  Plan variant [dropdown]  │  DOB [date]       ║│
+│ ║  Service [years] [months] │  Last day [  ][✕] ║│
+│ ╚═══════════════════════════════════════════════╝│
+│                                                  │
+│ ╔═ Earnings data ════════════════════════════════╗│
+│ ║  Paystub directory: [picker]                  ║│
+│ ║  AFC: $X,XXX.XX/mo — 5 best years,            ║│
+│ ║       regular earnings                        ║│
+│ ║  ▸ Show paystub detail / Export JSON          ║│
+│ ║                                               ║│
+│ ║  ────────────── or ──────────────             ║│
+│ ║                                               ║│
+│ ║  Monthly AFC ($): [__________]                ║│
+│ ╚═══════════════════════════════════════════════╝│
+├─────────────────────────────────────────────────┤
+│  [Calculate ▶]  Status line (errors / warnings)  │
+├─────────────────────────────────────────────────┤
+│                                                  │
+│  D3 SVG chart                                    │
+│                                                  │
+└─────────────────────────────────────────────────┘
 ```
 
-The status line shows:
-- Input validation errors (missing/invalid fields)
-- "No eligible retirement dates found in this range" if data series is empty
-- Clear (hidden) when chart renders successfully
+**Calculate button** is disabled until:
+- Group 1: plan variant selected AND date of birth entered
+- Group 2: AFC computed from paystubs OR manual AFC value > 0
+
+When both Group 2 options are filled, the manual AFC value takes precedence.
 
 ---
 
 ## Graph Specification
 
-**Technology**: D3.js v7, rendered to SVG, inlined into `index.html` (~260KB minified).
-SVG output is resolution-independent.
+**Technology**: D3.js v7, rendered to SVG, inlined into `index.html`.
 
 **Axes**:
-- X axis (horizontal): Monthly Pension ($), `d3.scaleLinear()`
-- Y axis (vertical): Retirement Date, `d3.scaleTime()`
-- Y orientation: earlier dates at **bottom**, later dates at **top** — curve slopes
-  naturally up-right (retire later → higher pension)
+- X (horizontal): Monthly Pension ($), `d3.scaleLinear()`
+- Y (vertical): Retirement Date, `d3.scaleTime()`, earlier at bottom
 
-**X axis — Monthly Pension ($)**
-- Range: $0 → max computed pension rounded up to nearest $1,000
-- Major ticks every $1,000: labeled, full-height tick line
-- Minor ticks every $100: unlabeled, shorter tick line
-- Implemented via `axis.tickValues()` with two separate `<g>` tick layers
+**X axis**:
+- Range: $0 → max pension rounded up to nearest $1,000
+- Major ticks every $1,000: labeled, full-height gridlines
+- Minor ticks every $100: unlabeled, shorter marks
 
-**Y axis — Retirement Date**
-- Lower bound: first day of next calendar month (runtime)
-- Upper bound: member's earliest normal retirement date + 10 years;
-  if already past normal retirement eligibility: today + 10 years
-- Major ticks on January 1 of each year: labeled with 4-digit year, full-height tick line
-- Minor ticks on 1st of every other month: unlabeled, shorter tick line
-- Implemented the same way as X axis tick layers
+**Y axis**:
+- Lower bound: 1st of next calendar month
+- Upper bound: earliest normal retirement date + 10 years (or today + 10 years
+  if already past normal eligibility)
+- Major ticks: Jan 1 each year, labeled with 4-digit year
+- Minor ticks: 1st of every other month, unlabeled
 
-**Plot**
+**Plot**:
 - `d3.line()` with `line.defined(d => d.pension !== null)` — gaps for ineligible months
-- Shaded `<rect>` behind the curve covering the ineligible date range, labeled
-  "Not yet eligible"
-- Slope kink naturally visible where penalty factor reaches 1.0 at normal retirement
-- Hover tooltip: vertical/horizontal crosshair lines + label showing date and pension
-  (e.g., "May 2031 — $2,847/mo")
+- Shaded `<rect>` behind curve for ineligible range, labeled "Not yet eligible"
+- Staircase steps in the early retirement window (penalty drops 6% on each birthday,
+  flat between birthdays); smooth continuous slope outside the early window
+- Step up to full pension visible on the birthday the member reaches normal retirement age
+- Hover tooltip: crosshair lines + label "May 2031 — $2,847/mo"
 - Title: "ERS Monthly Pension vs. Retirement Date"
 - X label: "Monthly Pension — Maximum Allowance ($/month)"
 - Y label: "Retirement Date"
 
 ---
 
-## CLI Harness
+## Implementation Stages
 
-Language: Groovy script (`graphret`)
+### Stage 1: Bare scaffold
+**Goal**: `index.html` with full form structure in two fieldsets, D3 available,
+Calculate button wired to enable/disable logic, URL parameter pre-fill, no
+extraction or calculation yet
 
-Responsibilities:
-1. Parse named CLI arguments (`--plan`, `--dob`, `--membershipDate`, `--serviceYears`,
-   `--serviceMonths`, `--afc`)
-2. Validate all required params are present; print usage and exit on error
-3. Resolve absolute path to `index.html` (relative to script location)
-4. Construct `file:///absolute/path/index.html?plan=hybrid&dob=...`
-5. Call `java.awt.Desktop.desktop.browse(uri)` — cross-platform, no OS detection needed
+**URL parameters** (all optional, for development convenience):
+| Param | Field | Example |
+|---|---|---|
+| `plan` | Plan variant | `hybrid-post2012` |
+| `dob` | Date of birth | `1975-06-15` |
+| `svcYears` | Service years | `15` |
+| `svcMonths` | Service months | `3` |
+| `lastDay` | Last day of service | `2028-01-01` |
+| `afc` | Manual AFC ($/mo) | `4500` |
 
-~35 lines. No dependencies beyond the JDK.
+**Verify**:
+- Open from `file://`; both fieldsets visible; no console errors
+- `console.log(d3.version)` prints a version string
+- Calculate button is disabled on load
+- Filling plan + DOB alone does not enable it (Group 2 still empty)
+- Typing any positive value in the manual AFC field enables it (given plan + DOB set)
+- Clearing the manual AFC value disables it again
+- ✕ button clears the last-day-of-service field
+- Opening with `?plan=hybrid-post2012&dob=1975-06-15&afc=4500` pre-fills those
+  fields and enables the Calculate button immediately
+**Status**: Not Started
+
+---
+
+### Stage 2: Directory picker + JSON extraction
+**Goal**: Port the complete PDF extraction pipeline from `afc.html` exactly as-is
+— directory picker, `extractPaystub`, `filterStubs`, JSON display, per-file
+`<details>` view, JSON download button
+**Verify**: Pick the same paystub directory used with `afc.html`; confirm the
+extracted JSON is byte-for-byte identical; paper checks and stubs with missing
+dates are absent from the output
+**Status**: Not Started
+
+---
+
+### Stage 3: Plan variant dropdown + computed AFC
+**Goal**: Add the plan variant dropdown; after extraction runs, call `afcParams`
+to select N and mode, run the DP solver, compute `afcMonthly = total / N / 12`,
+and display it inline (e.g. "AFC: $4,413.00/mo — 5 best years, regular earnings")
+**Verify**:
+- `hybrid-post2012` → N=5, regular; `hybrid-pre2012` → N=3, total
+- `noncontributory` → N=3, total
+- Switching the dropdown after extraction immediately updates the displayed AFC
+**Status**: Not Started
+
+---
+
+### Stage 4: Manual AFC override
+**Goal**: Add a collapsed `<details>` block containing a number input; when a
+value is entered it replaces the computed AFC everywhere downstream; clearing it
+restores the computed value
+**Verify**: Enter an override; confirm the displayed AFC line changes to show
+the override value. Clear it; confirm the computed value returns
+**Status**: Not Started
+
+---
+
+### Stage 5: Date and service utility functions
+**Goal**: Implement and inline-test three pure functions:
+- `monthsBetween(a, b)` — whole calendar months from Date a to Date b
+- `fractionalAge(dob, date)` — age in fractional years
+- `serviceAtMonth(currentMonths, today, retDate, lastDayOfSvc)` — accrual with
+  optional cap; `lastDayOfSvc = null` means still active
+
+Render a small verification table directly on the page (no test framework) with
+a handful of known-answer cases for each function
+**Verify**: All rows in the table show expected values; no surprises at month
+boundaries (e.g. same day next month = exactly 1 month)
+**Status**: Not Started
+
+---
+
+### Stage 6: Pension series for Noncontributory (table output)
+**Goal**: Implement `calculateSeries(params)` for `noncontributory` only;
+render output as a plain HTML table — one row per candidate month showing:
+retirement date | service months | whole age | status (normal/early/ineligible) | pension
+**Verify**:
+- Rows before age 55 w/20 yos show `ineligible`, pension blank
+- Rows at age 55 w/20–29 yos show `early`; pension decreases by 6% on each
+  birthday and is flat between birthdays (confirming the staircase)
+- Rows at age 62 w/10 yos (or age 55 w/30 yos) show `normal`; penalty gone
+- Active-employee rows: service column increases month-by-month
+**Status**: Not Started
+
+---
+
+### Stage 7: Pension series for all plan variants (table output)
+**Goal**: Extend `calculateSeries` to cover all five plan variants; table
+updates when the plan dropdown changes
+**Verify**:
+- `hybrid-post2012`: normal at 65/10 yos or 60/30 yos; early at 55/20 yos
+- `hybrid-pre2012`: normal at 62/5 yos or 55/30 yos; same early threshold
+- `contributory-post2012`: normal at 60/10 yos; early at 55/25 yos
+- `contributory-pre2012`: normal at 55/5 yos; early at *any age* w/25 yos
+  (confirm: rows below age 55 with 25+ yos show `early`, not `ineligible`)
+- Dual-threshold plans: confirm `normal` fires on whichever condition is met first
+**Status**: Not Started
+
+---
+
+### Stage 8: D3 axes (no data)
+**Goal**: Replace the chart placeholder with a real SVG; render X and Y axes
+with correct tick structure but hardcoded ranges (X: $0–$5,000; Y: today to
+today+15 years)
+**Verify**: Both axes visible; X major ticks every $1,000 labeled, minor every
+$100 unlabeled; Y major ticks on Jan 1 each year labeled, minor on 1st of every
+other month; earlier dates at the bottom; no data yet
+**Status**: Not Started
+
+---
+
+### Stage 9: Pension curve + dynamic axis ranges
+**Goal**: Feed `calculateSeries` output into the chart; drive axis ranges from
+the data (X max rounded up to nearest $1,000; Y from first candidate month to
+10 years past earliest normal retirement date); draw the line with gaps at null
+**Verify**: Staircase steps clearly visible in early retirement window; line
+resumes after each step; line absent (gap) for ineligible months; service-driven
+upward slope visible for active employees; axis ranges fit the data
+**Status**: Not Started
+
+---
+
+### Stage 10: Ineligible region shading
+**Goal**: Add a shaded `<rect>` covering the Y range of ineligible months
+behind the curve, with a "Not yet eligible" label
+**Verify**: Shading covers exactly the ineligible date range and stops where
+the curve begins; label readable; curve renders on top of shading
+**Status**: Not Started
+
+---
+
+### Stage 11: Full form wiring + Calculate button
+**Goal**: Wire all form inputs (plan variant, DOB, service years/months, last
+day of service) to `calculateSeries`; Calculate button renders the chart;
+remove the debug series table from stages 6–7; add a status line that shows
+validation errors or "No eligible retirement dates found" when the series is empty
+**Verify**:
+- Changing any input and clicking Calculate updates the chart
+- Missing required fields show a clear error instead of a broken chart
+- Blank "last day of service" → active-employee accrual; filled date → service caps
+- "No eligible dates found" appears for implausible inputs (e.g., DOB = today)
+**Status**: Not Started
+
+---
+
+### Stage 12: Hover tooltip
+**Goal**: On mouse move over the chart, draw vertical + horizontal crosshair
+lines snapped to the nearest data point and show a label ("May 2031 — $2,847/mo")
+**Verify**: Tooltip appears on hover; snaps correctly to data points; disappears
+when mouse leaves the chart area; label text is correctly formatted
+**Status**: Not Started
 
 ---
 
@@ -213,57 +420,26 @@ Responsibilities:
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Chart library | D3.js v7 (inlined) | Full axis control; native major/minor tick support; SVG is resolution-independent; `line.defined()` handles gaps cleanly |
-| Age penalty rate | 6% per year below normal retirement age | No explicit rate in PDFs for Hybrid/Contributory; consistent with Noncontributory's stated rate |
-| Penalty calculation | Fractional years (months precision) | Smooth curve; graph is a planning tool, not an official estimate |
-| Retirement option | Maximum Allowance only | Survivor option reductions require actuarial factors not in source docs |
-| Plan scope | All three plans | Minimal added complexity; maximises usefulness |
-| Mixed Hybrid+Noncontributory service | **Not supported — most likely to change** | At least one intended user has mixed service; additive formula is known, deferred to follow-on |
-| AFC | User-entered fixed value | Salary trajectory modelling requires too many assumptions |
-| Delivery | Single HTML file (~270KB) | No server, no install, works offline and from `file://`; shareable as file or static host |
-| CLI harness | Groovy + `Desktop.browse()` | Language preference; cross-platform without OS detection |
-| Y-axis orientation | Earlier dates at bottom | Curve slopes up-right naturally; matches conventional graph reading direction |
+| Plan input | Single 5-option dropdown | One control fully specifies rules + AFC params; no ambiguity for Noncontributory |
+| Service accrual | Ongoing by default | Primary audience is active employees; later retirement = more service + higher pension |
+| Last day of service | Optional date input, blank = active | Covers separation/modelling use cases without cluttering the common case |
+| AFC source | Derived from paystubs | Replaces manual entry; primary goal of the project |
+| AFC display | Shown inline before Calculate | User can sanity-check before drawing chart |
+| Manual AFC entry | Peer option in Group 2 alongside paystub picker | Equal alternative, not a fallback; manual value takes precedence when both are set |
+| AFC parameters | Auto-selected from plan variant | User shouldn't need to know ERS rules; single source of truth |
+| AFC monthly | dpTotal / N / 12 | DP total is sum of annual earnings; pension formula needs monthly |
+| Chart library | D3.js v7 (inlined) | Full axis control; SVG resolution-independent; `line.defined()` handles gaps |
+| Multiple curves | Single curve | No use case expressed for overlays |
+| Age penalty | 6%/yr below normal retirement age | Consistent across all plans per PDFs |
+| Penalty granularity | Whole years (floor) | PDFs say "each year under age 62" — no monthly pro-ration; produces staircase curve |
+| Retirement option | Maximum Allowance only | Survivor reductions require actuarial factors not in source docs |
+| Mixed service | Not supported | Additive formula known; deferred to follow-on |
+| CLI harness | Removed | Paystub directory can't be passed via URL; limited value |
+| Delivery | Single HTML file | No server, no install; works offline from `file://` |
+| Debug UI | Collapsed by default | Keep for troubleshooting; not in main flow |
 
 ---
 
-## Implementation Stages
+## Open Questions
 
-### Stage 1: HTML scaffold
-**Goal**: `index.html` with form, status line, empty SVG chart area, and D3 inlined
-**Success**: Page loads from `file://`; form visible; D3 available; no console errors
-**Status**: Not Started
-
-### Stage 2: Calculation engine
-**Goal**: Self-contained JS function `calculateSeries(params)` returning array of
-`{date, pension}` — `pension` is `null` for ineligible months
-**Success**: Correct values for all cases:
-- Hybrid post-2012: normal retirement, early retirement with penalty, ineligible
-- Hybrid pre-2012: same
-- Contributory post-2012: same
-- Contributory pre-2012: "any age w/25 yos" early retirement
-- Noncontributory: normal, early with 6% penalty, ineligible
-- Dual normal threshold: penalty ends correctly when either condition is first met
-**Status**: Not Started
-
-### Stage 3: Form wiring + URL params
-**Goal**: Calculate button calls `calculateSeries()` with form values; URL params
-pre-fill form and auto-trigger on load if all present and valid
-**Success**: Manual form entry and CLI-supplied URL params both produce identical results
-**Status**: Not Started
-
-### Stage 4: Chart rendering
-**Goal**: D3 SVG chart matching the graph specification
-**Success**:
-- Correct axis ranges and orientation
-- Major and minor ticks on both axes at specified intervals
-- Curve with gaps at ineligible months
-- Shaded ineligible region with label
-- Hover tooltip with crosshairs
-- Status line shows error message when series is empty
-**Status**: Not Started
-
-### Stage 5: CLI harness
-**Goal**: Groovy script `graphret` parses args, constructs URL, opens browser
-**Success**: `./graphret --plan hybrid --dob 1975-06-15 --membershipDate 2015-03-01
---serviceYears 11 --serviceMonths 4 --afc 4500` opens browser with chart rendered
-**Status**: Not Started
+None currently blocking implementation.
