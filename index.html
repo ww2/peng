@@ -242,9 +242,200 @@
 
   <script type="module">
     import * as d3 from 'https://cdn.jsdelivr.net/npm/d3@7/+esm';
+    import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs';
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
 
     // Stage 1 smoke-test — remove in Stage 2
-    console.log('d3 version:', d3.version);
+    console.log('d3 scaleLinear:', typeof d3.scaleLinear);
+    console.log('pdfjs version:', pdfjsLib.version);
+
+    // ── PDF parsing constants ─────────────────────────────────────
+
+    const GAP_THRESHOLD = 30;
+
+    const ALIASES = {
+      'Overtime':   'Ordinary Overtime',
+      'Night Shft': 'Night Shift Differential',
+      'Holiday Py': 'Holiday Overtime Pay',
+      'Frng Retro': 'Fringe Retro',
+      'Gros Retro': 'Gross Retro',
+    };
+
+    const REVERSED_ALIASES = Object.fromEntries(
+      Object.entries(ALIASES).map(([old, canonical]) => [canonical, old])
+    );
+
+    const KNOWN = new Set([
+      'Regular',
+      'Ordinary Overtime',
+      'Night Shift Differential',
+      'Holiday Overtime Pay',
+      'Fringe Retro',
+      'Gross Retro',
+      'Temporary Hazard Pay',
+      'Taxable WIK',
+      'Tax WIK',
+      'BNS Retro',
+      'Bonus RetroPay Dues Eligible',
+    ]);
+
+    const IGNORED = new Set([
+      'Temporary Hazard Pay',
+      'Taxable WIK',
+      'Tax WIK',
+      'BNS Retro',
+      'Bonus RetroPay Dues Eligible',
+    ]);
+
+    // ── PDF parsing functions ─────────────────────────────────────
+
+    function reconstructRows(allItems) {
+      const rows = [];
+      for (const item of allItems) {
+        if (!item.str.trim()) continue;
+        const y = item.transform[5];
+        const x = item.transform[4];
+        const row = rows.find(r => Math.abs(r.y - y) <= 2);
+        if (row) {
+          row.items.push({ str: item.str, x, width: item.width });
+        } else {
+          rows.push({ y, items: [{ str: item.str, x, width: item.width }] });
+        }
+      }
+      rows.sort((a, b) => b.y - a.y);
+      rows.forEach(r => r.items.sort((a, b) => a.x - b.x));
+      return rows;
+    }
+
+    function rowToString(items) {
+      if (!items.length) return '';
+      const parts = [items[0].str];
+      for (let i = 1; i < items.length; i++) {
+        const airGap = items[i].x - (items[i-1].x + items[i-1].width);
+        if (airGap > GAP_THRESHOLD) parts.push('—');
+        parts.push(items[i].str);
+      }
+      return parts.join('  |  ');
+    }
+
+    function parseHeader(rows) {
+      let payBeginDate, payEndDate, issueDate, documentNumber, documentType = 'advice';
+      for (const { items } of rows) {
+        const line = items.map(i => i.str).join(' ');
+        let m;
+        if ((m = line.match(/Pay Begin Date:\s+(\d{2}\/\d{2}\/\d{4})/))) payBeginDate   = m[1];
+        if ((m = line.match(/Pay End Date:\s+(\d{2}\/\d{2}\/\d{4})/)))   payEndDate     = m[1];
+        if ((m = line.match(/Advice Date:\s+(\d{2}\/\d{2}\/\d{4})/)))    issueDate      = m[1];
+        if ((m = line.match(/Check Date:\s+(\d{2}\/\d{2}\/\d{4})/)))   { issueDate      = m[1]; documentType = 'check'; }
+        if ((m = line.match(/Advice #:\s+(\d+)/)))                        documentNumber = m[1];
+        if ((m = line.match(/Check #:\s+(\d+)/)))                       { documentNumber = m[1]; documentType = 'check'; }
+      }
+      return { payBeginDate, payEndDate, issueDate, documentType, documentNumber };
+    }
+
+    function findEarningsBlock(rows) {
+      let sectionIdx = -1, headerIdx = -1, totalIdx = -1;
+      for (let i = 0; i < rows.length; i++) {
+        const line = rows[i].items.map(it => it.str).join(' ');
+        if (sectionIdx < 0 && line.includes('HOURS AND EARNINGS')) {
+          sectionIdx = i;
+        } else if (sectionIdx >= 0 && headerIdx < 0 &&
+                   /Description\s.*Rate\s.*Hours\s.*Earnings/.test(line)) {
+          headerIdx = i;
+        } else if (headerIdx >= 0 && totalIdx < 0 &&
+                   line.trimStart().startsWith('TOTAL:')) {
+          totalIdx = i;
+        }
+      }
+      return { sectionIdx, headerIdx, totalIdx };
+    }
+
+    function findTaxBoundaryX(rows, headerIdx) {
+      if (headerIdx < 0) return Infinity;
+      let seen = 0;
+      for (const item of rows[headerIdx].items) {
+        if (item.str === 'Description' && ++seen === 2) return item.x;
+      }
+      return Infinity;
+    }
+
+    function parseEarnings(rows, headerIdx, totalIdx) {
+      const currentEarnings = {};
+      const ytdEarnings     = {};
+      const warnings        = [];
+      const moneyRe         = /^[\d,]+\.\d{2}$/;
+      const taxBoundaryX    = findTaxBoundaryX(rows, headerIdx);
+
+      for (let i = headerIdx + 1; i < totalIdx; i++) {
+        const items = rows[i].items.filter(it => it.x < taxBoundaryX);
+        if (!items.length) continue;
+        if (items[0].str.trimStart().startsWith('-')) continue;
+        if (!/^[A-Za-z]/.test(items[0].str)) continue;
+
+        const descItems = [items[0]];
+        for (let j = 1; j < items.length; j++) {
+          const gap = items[j].x - (items[j-1].x + items[j-1].width);
+          if (gap > GAP_THRESHOLD) break;
+          descItems.push(items[j]);
+        }
+        const rawDesc     = descItems.map(it => it.str).join(' ').trim();
+        const description = ALIASES[rawDesc] ?? rawDesc;
+
+        if (!KNOWN.has(description)) {
+          warnings.push(`unknown earning type '${rawDesc}'`);
+          console.warn(`unknown earning type '${rawDesc}'`);
+        }
+
+        const values = items
+          .slice(descItems.length)
+          .filter(it => moneyRe.test(it.str))
+          .map(it => Number(it.str.replace(/,/g, '')));
+
+        if (values.length > 0)
+          currentEarnings[description] = (currentEarnings[description] ?? 0) + values[0];
+        if (values.length > 1)
+          ytdEarnings[description] = (ytdEarnings[description] ?? 0) + values[1];
+      }
+
+      const sortKeys = obj => Object.fromEntries(Object.entries(obj).sort(([a], [b]) => a.localeCompare(b)));
+      return { currentEarnings: sortKeys(currentEarnings), ytdEarnings: sortKeys(ytdEarnings), warnings };
+    }
+
+    // ── Core extraction ──────────────────────────────────────────
+
+    async function extractPaystub(file) {
+      const buffer   = await file.arrayBuffer();
+      const pdf      = await pdfjsLib.getDocument({ data: buffer }).promise;
+      const allItems = [];
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page    = await pdf.getPage(p);
+        const content = await page.getTextContent();
+        allItems.push(...content.items);
+      }
+
+      const rows    = reconstructRows(allItems);
+      const header  = parseHeader(rows);
+      const block   = findEarningsBlock(rows);
+      const { currentEarnings, ytdEarnings, warnings } =
+        (block.headerIdx >= 0 && block.totalIdx >= 0)
+          ? parseEarnings(rows, block.headerIdx, block.totalIdx)
+          : { currentEarnings: {}, ytdEarnings: {}, warnings: ['earnings block not found'] };
+
+      return {
+        file           : file.webkitRelativePath,
+        payBeginDate   : header.payBeginDate,
+        payEndDate     : header.payEndDate,
+        issueDate      : header.issueDate,
+        documentType   : header.documentType,
+        documentNumber : header.documentNumber,
+        currentEarnings,
+        ytdEarnings,
+        _rows    : rows,
+        _block   : block,
+        _warnings: warnings,
+      };
+    }
 
     // ── State ────────────────────────────────────────────────────
     // afcComputed is set by Stage 2 when extraction succeeds.
