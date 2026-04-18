@@ -242,6 +242,7 @@
         </div>
         <div id="afc-computed"></div>
         <div id="afc-date-range"></div>
+        <div id="regular-earnings"></div>
       </div>
       <div class="col-divider"></div>
       <details id="debug-details" class="disabled">
@@ -300,8 +301,9 @@
     const pickerBtn        = document.getElementById('picker-btn');
     const cancelBtn        = document.getElementById('cancel-btn');
     const pickerPath       = document.getElementById('picker-path');
-    const afcComputedEl    = document.getElementById('afc-computed');
-    const afcDateRange     = document.getElementById('afc-date-range');
+    const afcComputedEl     = document.getElementById('afc-computed');
+    const afcDateRange      = document.getElementById('afc-date-range');
+    const regularEarningsEl = document.getElementById('regular-earnings');
     const debugDetails     = document.getElementById('debug-details');
     const debugBody        = document.getElementById('debug-body');
     const lastDayClearBtn  = document.getElementById('last-day-clear');
@@ -325,9 +327,10 @@
     cancelBtn.addEventListener('click', () => { cancelRequested = true; });
 
     // Some browsers restore file input selections across reloads; clear on load.
-    pickerEl.value            = '';
-    pickerPath.textContent    = '';
-    afcDateRange.textContent  = '';
+    pickerEl.value                = '';
+    pickerPath.textContent        = '';
+    afcDateRange.textContent      = '';
+    regularEarningsEl.textContent = '';
 
     pickerEl.addEventListener('change', async function () {
       const pdfs = Array.from(this.files)
@@ -347,8 +350,9 @@
 
       debugDetails.open = false;
       debugDetails.classList.add('disabled');
-      afcComputedEl.textContent = 'Extracting…';
-      afcDateRange.textContent  = '';
+      afcComputedEl.textContent     = 'Extracting…';
+      afcDateRange.textContent      = '';
+      regularEarningsEl.textContent = '';
       debugBody.innerHTML = '';
 
       cancelRequested = false;
@@ -447,6 +451,13 @@
 
       lastStubs   = stubs;
       lastWindows = windows;
+
+      const lastWin = lastWindows[lastWindows.length - 1];
+      if (lastWin) {
+        const regularAvg = lastWin.stubs.reduce((sum, s) => sum + scoreStub(s, 'regular'), 0) / 12;
+        regularEarningsEl.textContent =
+          `Regular avg earnings (${fmtDate(lastWin.start)} – ${fmtDate(lastWin.endIncl)}): $${fmtMoney(regularAvg)}/mo`;
+      }
 
       debugDetails.classList.remove('disabled');
       const dpResult = computeAndFillAfc();
@@ -1135,8 +1146,9 @@
       // Picker UI
       pickerEl.value           = '';
       pickerPath.textContent   = '';
-      afcComputedEl.textContent = '';
-      afcDateRange.textContent  = '';
+      afcComputedEl.textContent     = '';
+      afcDateRange.textContent      = '';
+      regularEarningsEl.textContent = '';
 
       // Debug panel
       debugDetails.open = false;

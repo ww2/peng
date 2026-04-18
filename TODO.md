@@ -1,9 +1,8 @@
 # ERS Pension Graph — Deferred Work
 
-## AFC details
+## Paystub display
 
-For that matter, is there a good place to show me something like the monthly
-compensation based on my most recent paystub's regular earnings?
+I'd like to move the control that expands the list of scanned PDFs to be centered in its own full-width panel at the bottom of the 'Earnings data' group; and keep that panel hidden until the scan completes.
 
 ## Paystub handling
 

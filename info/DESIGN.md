@@ -18,6 +18,7 @@ configs, and eligibility rules live in `CLAUDE.md`; deferred features live in
 | AFC parameters | Auto-selected from plan variant | User shouldn't need to know ERS rules; single source of truth |
 | Plan-change prompt | Confirm before overwriting non-empty AFC | Prevents silent loss of a manually edited value; recomputes from in-memory stubs on confirm; if cancelled, dropdown reverts |
 | AFC monthly | `dpTotal / N / 12` | DP total is sum of annual earnings across N windows; pension formula needs monthly |
+| AFC window boundaries | Calendar-month aligned (start on 1st, end on last day of month) | The spec says "twelve consecutive months, not necessarily by fiscal or calendar years" — alignment is unspecified. Calendar-month alignment matches how payroll periods are typically reported and keeps window edges unambiguous. Stubs whose `payEndDate` does not fall on the last day of a month do not qualify as window anchors, so a partial trailing month is excluded from consideration. |
 | Chart library | D3.js v7 (inlined) | Full axis control; SVG resolution-independent; `line.defined()` handles gaps cleanly |
 | Multiple curves | Single curve | No use case expressed for overlays at time of implementation |
 | Age penalty | 6%/yr below normal retirement age | Consistent across all plans per source PDFs |
