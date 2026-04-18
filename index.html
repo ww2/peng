@@ -1348,6 +1348,74 @@
         .attr('font-family', 'monospace').attr('font-size', '0.85rem').attr('font-weight', 'bold')
         .attr('fill', '#222')
         .text('ERS Monthly Pension vs. Retirement Date');
+
+      // ── Tooltip ──────────────────────────────────────────────────
+      if (eligible.length) {
+        const MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const bisect  = d3.bisector(d => d.retDate).left;
+
+        const tip = g.append('g').attr('display', 'none');
+
+        tip.append('line').attr('class', 'tip-v')
+          .attr('y1', 0).attr('y2', iH)
+          .attr('stroke', '#aaa').attr('stroke-width', 1).attr('stroke-dasharray', '4,3');
+
+        tip.append('line').attr('class', 'tip-h')
+          .attr('x1', 0).attr('x2', iW)
+          .attr('stroke', '#aaa').attr('stroke-width', 1).attr('stroke-dasharray', '4,3');
+
+        tip.append('circle').attr('class', 'tip-dot')
+          .attr('r', 3.5).attr('fill', '#0066cc');
+
+        const tipLabel = tip.append('g');
+        const tipRect  = tipLabel.append('rect')
+          .attr('fill', 'white').attr('stroke', '#bbb').attr('rx', 3);
+        const tipText  = tipLabel.append('text')
+          .attr('font-family', 'monospace').attr('font-size', '0.75rem')
+          .attr('fill', '#222').attr('dominant-baseline', 'hanging');
+
+        // Transparent overlay — must be last so it sits on top for event capture.
+        g.append('rect')
+          .attr('width', iW).attr('height', iH)
+          .attr('fill', 'none').attr('pointer-events', 'all')
+          .on('mousemove', function(event) {
+            const [mx]      = d3.pointer(event);
+            const hoverDate = xScale.invert(mx);
+
+            let idx = bisect(eligible, hoverDate);
+            if (idx >= eligible.length) idx = eligible.length - 1;
+            if (idx > 0 &&
+                Math.abs(eligible[idx - 1].retDate - hoverDate) <
+                Math.abs(eligible[idx].retDate - hoverDate)) idx--;
+            const pt = eligible[idx];
+
+            const px = xScale(pt.retDate);
+            const py = yScale(pt.pension);
+
+            tip.select('.tip-v').attr('x1', px).attr('x2', px);
+            tip.select('.tip-h').attr('y1', py).attr('y2', py);
+            tip.select('.tip-dot').attr('cx', px).attr('cy', py);
+
+            const pension = Math.round(pt.pension).toString()
+              .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            tipText.text(
+              `${MONTHS[pt.retDate.getMonth()]} ${pt.retDate.getFullYear()} — $${pension}/mo`
+            );
+
+            const pad = 6;
+            const bb  = tipText.node().getBBox();
+            const lw  = bb.width  + pad * 2;
+            const lh  = bb.height + pad * 2;
+            const lx  = px + 12 + lw > iW ? px - 12 - lw : px + 12;
+            const ly  = Math.max(0, Math.min(iH - lh, py - lh / 2));
+
+            tipRect.attr('x', lx).attr('y', ly).attr('width', lw).attr('height', lh);
+            tipText.attr('x', lx + pad).attr('y', ly + pad);
+
+            tip.attr('display', null);
+          })
+          .on('mouseleave', () => tip.attr('display', 'none'));
+      }
     }
 
     drawChart();

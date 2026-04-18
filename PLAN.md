@@ -454,7 +454,7 @@ errors or "No eligible retirement dates found" when the series is empty
 lines snapped to the nearest data point and show a label ("May 2031 — $2,847/mo")
 **Verify**: Tooltip appears on hover; snaps correctly to data points; disappears
 when mouse leaves the chart area; label text is correctly formatted
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
