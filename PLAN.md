@@ -7,7 +7,7 @@ A single `index.html` file that:
 2. Extracts earnings data from each paystub using pdf.js
 3. Automatically calculates the AFC (Average Final Compensation) appropriate
    to the user's plan type and membership date
-4. Plots **monthly pension (X) vs. retirement date (Y)** for every eligible
+4. Plots **retirement date (X) vs. monthly pension (Y)** for every eligible
    month from now through 10 years past the member's normal retirement date
 
 Works standalone from `file://` with no server.
@@ -208,22 +208,22 @@ changes, recomputation happens silently.
 **Technology**: D3.js v7, rendered to SVG, inlined into `index.html`.
 
 **Axes**:
-- X (horizontal): Monthly Pension ($), `d3.scaleLinear()`
-- Y (vertical): Retirement Date, `d3.scaleTime()`, earlier at bottom
+- X (horizontal): Retirement Date, `d3.scaleTime()`, earlier on left
+- Y (vertical): Monthly Pension ($), `d3.scaleLinear()`
 
 **X axis**:
-- Range: $0 → max pension rounded up to nearest $1,000
-- Major ticks every $1,000: labeled, full-height gridlines
-- Minor ticks every $100: unlabeled, shorter marks
-
-**Y axis**:
 - Lower bound: 1st of next calendar month
 - Upper bound: earliest normal retirement date + 10 years (or today + 10 years
   if already past normal eligibility)
-- Orientation: earlier dates at **bottom**, later dates at **top** — curve slopes
+- Orientation: earlier dates on **left**, later dates on **right** — curve slopes
   up-right naturally (retire later → higher pension)
 - Major ticks: Jan 1 each year, labeled with 4-digit year
 - Minor ticks: 1st of every other month, unlabeled
+
+**Y axis**:
+- Range: $0 → max pension rounded up to nearest $1,000
+- Major ticks every $1,000: labeled, full-height gridlines
+- Minor ticks every $100: unlabeled, shorter marks
 
 Both axes use `axis.tickValues()` with two separate `<g>` tick layers (one for
 major, one for minor) to achieve independent label and length control.
@@ -236,8 +236,8 @@ major, one for minor) to achieve independent label and length control.
 - Step up to full pension visible on the birthday the member reaches normal retirement age
 - Hover tooltip: crosshair lines + label "May 2031 — $2,847/mo"
 - Title: "ERS Monthly Pension vs. Retirement Date"
-- X label: "Monthly Pension — Maximum Allowance ($/month)"
-- Y label: "Retirement Date"
+- X label: "Retirement Date"
+- Y label: "Monthly Pension — Maximum Allowance ($/month)"
 
 ---
 
@@ -372,11 +372,11 @@ retirement date | service months | whole age | status (normal/early/ineligible) 
 
 ### Stage 6: D3 axes (no data)
 **Goal**: Replace the chart placeholder with a real SVG; render X and Y axes
-with correct tick structure but hardcoded ranges (X: $0–$5,000; Y: today to
-today+15 years)
-**Verify**: Both axes visible; X major ticks every $1,000 labeled, minor every
-$100 unlabeled; Y major ticks on Jan 1 each year labeled, minor on 1st of every
-other month; earlier dates at the bottom; no data yet
+with correct tick structure but hardcoded ranges (X: today to today+15 years;
+Y: $0–$5,000)
+**Verify**: Both axes visible; X major ticks on Jan 1 each year labeled, minor
+on 1st of every other month; Y major ticks every $1,000 labeled, minor every
+$100 unlabeled; earlier dates on the left; no data yet
 **Status**: Complete
 
 ---
@@ -388,16 +388,16 @@ other month; earlier dates at the bottom; no data yet
 **Verify**: Line visible over existing axes; staircase steps clearly visible in
 early retirement window; line resumes after each step; line absent (gap) for
 ineligible months; service-driven upward slope visible for active employees
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
 ### Stage 8: Dynamic axis ranges
-**Goal**: Replace hardcoded axis ranges with data-driven ones — X max rounded up
-to nearest $1,000; Y from first candidate month to 10 years past earliest normal
-retirement date
-**Verify**: Axis ranges update when inputs change; X max tracks the highest
-pension value; Y bounds are tight to the data; staircase and gaps still correct
+**Goal**: Replace hardcoded axis ranges with data-driven ones — X from first
+candidate month to 10 years past earliest normal retirement date; Y max rounded
+up to nearest $1,000
+**Verify**: Axis ranges update when inputs change; Y max tracks the highest
+pension value; X bounds are tight to the data; staircase and gaps still correct
 **Status**: Not Started
 
 ---
@@ -476,7 +476,7 @@ when mouse leaves the chart area; label text is correctly formatted
 | Retirement option | Maximum Allowance only | Survivor reductions require actuarial factors not in source docs |
 | Plan scope | All three plans (5 variants) | Minimal added complexity; maximises usefulness |
 | Mixed service | Not supported — **most likely to change** | Additive formula known; at least one intended user has mixed Hybrid+Noncontributory service; deferred to follow-on |
-| Y-axis orientation | Earlier dates at bottom | Curve slopes up-right naturally; matches conventional graph reading direction |
+| X-axis orientation | Earlier dates on left | Curve slopes up-right naturally; matches conventional graph reading direction |
 | CLI harness | Removed | Paystub directory can't be passed via URL; limited value |
 | Delivery | Single HTML file | No server, no install; works offline from `file://` |
 | Debug UI | Collapsed by default | Keep for troubleshooting; not in main flow |
