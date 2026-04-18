@@ -1292,10 +1292,22 @@
 
       // ── Scales ─────────────────────────────────────────────────
       const today = new Date();
-      const xMin  = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-      const xMax  = new Date(today.getFullYear() + 15, today.getMonth() + 1, 1);
+      const fallbackXMin = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+      const fallbackXMax = new Date(today.getFullYear() + 15, today.getMonth() + 1, 1);
+
+      const xMin = series ? series[0].retDate                 : fallbackXMin;
+      const xMax = series ? series[series.length - 1].retDate : fallbackXMax;
+
+      const eligible = series ? series.filter(d => d.pension !== null) : [];
+      const yMin = eligible.length
+        ? Math.floor(Math.min(...eligible.map(d => d.pension)) / 1000) * 1000
+        : 0;
+      const yMax = eligible.length
+        ? Math.ceil(Math.max(...eligible.map(d => d.pension)) / 1000) * 1000
+        : 5000;
+
       const xScale = d3.scaleTime().domain([xMin, xMax]).range([0, iW]);
-      const yScale = d3.scaleLinear().domain([0, 5000]).range([iH, 0]);
+      const yScale = d3.scaleLinear().domain([yMin, yMax]).range([iH, 0]);
 
       // ── Tick values ─────────────────────────────────────────────
       const xMajorVals = [], xMinorVals = [];
@@ -1307,8 +1319,8 @@
           if (d >= xMin && d <= xMax) xMinorVals.push(d);
         }
       }
-      const yMajorVals = d3.range(0, 5001, 1000);
-      const yMinorVals = d3.range(0, 5001, 100).filter(v => v % 1000 !== 0);
+      const yMajorVals = d3.range(yMin, yMax + 1, 1000);
+      const yMinorVals = d3.range(yMin, yMax + 1, 100).filter(v => v % 1000 !== 0);
 
       // ── X axis (retirement date) ────────────────────────────────
       g.append('g').selectAll('line').data(xMajorVals).join('line')

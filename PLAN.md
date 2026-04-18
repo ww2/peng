@@ -221,7 +221,7 @@ changes, recomputation happens silently.
 - Minor ticks: 1st of every other month, unlabeled
 
 **Y axis**:
-- Range: $0 → max pension rounded up to nearest $1,000
+- Range: min pension floored to nearest $1,000 → max pension ceiled to nearest $1,000
 - Major ticks every $1,000: labeled, full-height gridlines
 - Minor ticks every $100: unlabeled, shorter marks
 
@@ -394,11 +394,12 @@ ineligible months; service-driven upward slope visible for active employees
 
 ### Stage 8: Dynamic axis ranges
 **Goal**: Replace hardcoded axis ranges with data-driven ones — X from first
-candidate month to 10 years past earliest normal retirement date; Y max rounded
-up to nearest $1,000
-**Verify**: Axis ranges update when inputs change; Y max tracks the highest
-pension value; X bounds are tight to the data; staircase and gaps still correct
-**Status**: Not Started
+candidate month to 10 years past earliest normal retirement date; Y from the
+nearest $1,000 floor below the minimum pension to the nearest $1,000 ceiling
+above the maximum pension
+**Verify**: Axis ranges update when inputs change; Y min and max track the
+pension range; X bounds are tight to the data; staircase and gaps still correct
+**Status**: Complete
 
 ---
 
