@@ -269,6 +269,43 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
 
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    const CHART = {
+      font           : 'monospace',
+      colorIneligible: '#f5f5f5',
+      colorGrid      : '#e0e0e0',
+      colorAxis      : '#555',
+      colorLabel     : '#333',
+      colorMinor     : '#bbb',
+      colorLine      : '#0066cc',
+      colorTitle     : '#222',
+      colorCrosshair : '#aaa',
+    };
+
+    // ── DOM element cache ─────────────────────────────────────────
+    const planEl           = document.getElementById('plan');
+    const dobEl            = document.getElementById('dob');
+    const svcYearsEl       = document.getElementById('svc-years');
+    const svcMonthsEl      = document.getElementById('svc-months');
+    const svcAsOfEl        = document.getElementById('svc-as-of');
+    const svcAsOfField     = document.getElementById('svc-as-of-field');
+    const lastDayEl        = document.getElementById('last-day');
+    const manualAfcEl      = document.getElementById('manual-afc');
+    const earningsFieldset = document.getElementById('group-earnings-input');
+    const statusLine       = document.getElementById('status-line');
+    const reloadLink       = document.getElementById('reload-link');
+    const clearBtn         = document.getElementById('clear-btn');
+    const pickerEl         = document.getElementById('picker');
+    const pickerBtn        = document.getElementById('picker-btn');
+    const cancelBtn        = document.getElementById('cancel-btn');
+    const pickerPath       = document.getElementById('picker-path');
+    const afcComputedEl    = document.getElementById('afc-computed');
+    const afcDateRange     = document.getElementById('afc-date-range');
+    const debugDetails     = document.getElementById('debug-details');
+    const debugBody        = document.getElementById('debug-body');
+    const lastDayClearBtn  = document.getElementById('last-day-clear');
+
     // ── Plan configs ─────────────────────────────────────────────
     const PLAN_CONFIGS = {
       'hybrid-post2012':       { multiplier: 0.0175, N: 5, mode: 'regular' },
@@ -284,20 +321,15 @@
     let lastWindows     = [];
     let cancelRequested = false;
 
-    document.getElementById('picker-btn').addEventListener('click', () => {
-      document.getElementById('picker').click();
-    });
-
-    document.getElementById('cancel-btn').addEventListener('click', () => {
-      cancelRequested = true;
-    });
+    pickerBtn.addEventListener('click', () => pickerEl.click());
+    cancelBtn.addEventListener('click', () => { cancelRequested = true; });
 
     // Some browsers restore file input selections across reloads; clear on load.
-    document.getElementById('picker').value = '';
-    document.getElementById('picker-path').textContent = '';
-    document.getElementById('afc-date-range').textContent = '';
+    pickerEl.value            = '';
+    pickerPath.textContent    = '';
+    afcDateRange.textContent  = '';
 
-    document.getElementById('picker').addEventListener('change', async function () {
+    pickerEl.addEventListener('change', async function () {
       const pdfs = Array.from(this.files)
         .filter(f => f.name.toLowerCase().endsWith('.pdf'))
         .sort((a, b) => a.webkitRelativePath.localeCompare(b.webkitRelativePath));
@@ -306,23 +338,17 @@
       pdfs.forEach(f => { pdfFiles[f.webkitRelativePath] = f; });
 
       const dirName = pdfs[0]?.webkitRelativePath.split('/')[0] ?? '';
-      document.getElementById('picker-path').textContent = dirName ? `  …/${dirName}` : '';
+      pickerPath.textContent = dirName ? `  …/${dirName}` : '';
 
       // Clear any previously computed AFC immediately.
-      document.getElementById('manual-afc').value = '';
+      manualAfcEl.value = '';
       updateReloadLink();
       maybeCalculate();
 
-      const afcComputedEl = document.getElementById('afc-computed');
-      const debugBody     = document.getElementById('debug-body');
-      const cancelBtn     = document.getElementById('cancel-btn');
-      const pickerBtn     = document.getElementById('picker-btn');
-
-      const debugDetails = document.getElementById('debug-details');
       debugDetails.open = false;
       debugDetails.classList.add('disabled');
       afcComputedEl.textContent = 'Extracting…';
-      document.getElementById('afc-date-range').textContent = '';
+      afcDateRange.textContent  = '';
       debugBody.innerHTML = '';
 
       cancelRequested = false;
@@ -411,12 +437,11 @@
       debugBody.appendChild(showFilterSummary(results.length, stubs, dropped, errors, windows));
 
       // Status lines
-      const toYmd = s => { const [m, d, y] = s.split('/'); return `${y}/${m}/${d}`; };
       const first = stubs[0];
       const last  = stubs[stubs.length - 1];
       afcComputedEl.textContent =
         `${stubs.length} stub${stubs.length !== 1 ? 's' : ''} extracted`;
-      document.getElementById('afc-date-range').textContent = (first && last)
+      afcDateRange.textContent = (first && last)
         ? `Paystubs from ${toYmd(first.payBeginDate)} to ${toYmd(last.payEndDate)}`
         : '';
 
@@ -617,6 +642,9 @@
     }
 
     // ── Date utilities ───────────────────────────────────────────
+    // Reformat MM/dd/yyyy → yyyy/MM/dd for display.
+    function toYmd(s) { const [m, d, y] = s.split('/'); return `${y}/${m}/${d}`; }
+
     // Parse MM/dd/yyyy → Date
     function parseDate(s) {
       const [m, d, y] = s.split('/');
@@ -854,7 +882,7 @@
 
     // ── AFC computation ──────────────────────────────────────────
     function computeAndFillAfc() {
-      const config = PLAN_CONFIGS[document.getElementById('plan').value];
+      const config = PLAN_CONFIGS[planEl.value];
       if (!config || !lastWindows.length) return;
       const scored = lastWindows.map(w => ({
         ...w,
@@ -862,7 +890,7 @@
       }));
       const result = solveDP(scored, config.N);
       if (!result) return;
-      document.getElementById('manual-afc').value = (result.total / config.N / 12).toFixed(2);
+      manualAfcEl.value = (result.total / config.N / 12).toFixed(2);
     }
 
     // ── Display helpers ──────────────────────────────────────────
@@ -1043,46 +1071,36 @@
     // ── Reactive calculate logic ──────────────────────────────────
     function canCalculate() {
       const group1Ok = !!(
-        document.getElementById('plan').value &&
-        document.getElementById('dob').value &&
-        (document.getElementById('last-day').value ||
-         document.getElementById('svc-as-of').value)
+        planEl.value &&
+        dobEl.value &&
+        (lastDayEl.value || svcAsOfEl.value)
       );
-      const manualAfc = parseFloat(document.getElementById('manual-afc').value);
-      return group1Ok && manualAfc > 0;
+      return group1Ok && parseFloat(manualAfcEl.value) > 0;
     }
 
     function maybeCalculate() {
       if (canCalculate()) runCalculate(); else drawChart();
     }
 
-    ['dob', 'svc-years', 'svc-months', 'svc-as-of', 'last-day'].forEach(id =>
-      document.getElementById(id).addEventListener('input', maybeCalculate)
+    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl].forEach(el =>
+      el.addEventListener('input', maybeCalculate)
     );
-    document.getElementById('manual-afc').addEventListener('change', maybeCalculate);
+    manualAfcEl.addEventListener('change', maybeCalculate);
 
     function runCalculate() {
-      const plan       = document.getElementById('plan').value;
-      const svcYears   = parseInt(document.getElementById('svc-years').value)  || 0;
-      const svcMonths  = parseInt(document.getElementById('svc-months').value) || 0;
-      const lastDayVal = document.getElementById('last-day').value;
-      const asOfVal    = document.getElementById('svc-as-of').value;
-
-      const dob          = parseIsoDate(document.getElementById('dob').value);
+      const lastDayVal   = lastDayEl.value;
       const lastDayOfSvc = lastDayVal ? parseIsoDate(lastDayVal) : null;
-      const asOfDate     = lastDayOfSvc ?? parseIsoDate(asOfVal);
-      const afcMonthly   = parseFloat(document.getElementById('manual-afc').value);
+      const asOfDate     = lastDayOfSvc ?? parseIsoDate(svcAsOfEl.value);
 
-      const series = calculateSeries({
-        plan,
-        dob,
-        enteredSvcMonths: svcYears * 12 + svcMonths,
+      const series  = calculateSeries({
+        plan             : planEl.value,
+        dob              : parseIsoDate(dobEl.value),
+        enteredSvcMonths : (parseInt(svcYearsEl.value) || 0) * 12 + (parseInt(svcMonthsEl.value) || 0),
         asOfDate,
         lastDayOfSvc,
-        afcMonthly,
+        afcMonthly       : parseFloat(manualAfcEl.value),
       });
-      const statusLine = document.getElementById('status-line');
-      const eligible   = series.filter(d => d.pension !== null);
+      const eligible = series.filter(d => d.pension !== null);
       statusLine.textContent = eligible.length === 0
         ? 'No eligible retirement dates found.' : '';
       drawChart(series);
@@ -1090,9 +1108,8 @@
 
     function runClear() {
       // Form inputs
-      ['plan', 'dob', 'svc-years', 'svc-months', 'svc-as-of', 'last-day', 'manual-afc'].forEach(id => {
-        document.getElementById(id).value = '';
-      });
+      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl]
+        .forEach(el => { el.value = ''; });
 
       // PDF picker state
       pdfFiles        = {};
@@ -1101,21 +1118,20 @@
       cancelRequested = false;
 
       // Picker UI
-      document.getElementById('picker').value          = '';
-      document.getElementById('picker-path').textContent = '';
-      document.getElementById('afc-computed').textContent = '';
-      document.getElementById('afc-date-range').textContent = '';
+      pickerEl.value           = '';
+      pickerPath.textContent   = '';
+      afcComputedEl.textContent = '';
+      afcDateRange.textContent  = '';
 
       // Debug panel
-      const debugDetails = document.getElementById('debug-details');
       debugDetails.open = false;
       debugDetails.classList.add('disabled');
-      document.getElementById('debug-body').innerHTML = '';
+      debugBody.innerHTML = '';
 
       // Group 2 fieldset, prevPlanValue, status line
-      document.getElementById('group-earnings-input').disabled = true;
-      prevPlanValue = '';
-      document.getElementById('status-line').textContent = '';
+      earningsFieldset.disabled  = true;
+      prevPlanValue              = '';
+      statusLine.textContent     = '';
 
       // "As of" field visibility
       syncAsOfVisibility();
@@ -1124,15 +1140,12 @@
       drawChart();
     }
 
-    document.getElementById('clear-btn').addEventListener('click', runClear);
+    clearBtn.addEventListener('click', runClear);
 
-    document.getElementById('plan').addEventListener('input', () => {
-      const planEl = document.getElementById('plan');
+    planEl.addEventListener('input', () => {
       const newVal = planEl.value;
-      const afcEl  = document.getElementById('manual-afc');
-      const earningsFieldset = document.getElementById('group-earnings-input');
 
-      if (afcEl.value.trim() && newVal) {
+      if (manualAfcEl.value.trim() && newVal) {
         if (!confirm('Changing the plan will recompute your Monthly AFC. Continue?')) {
           planEl.value = prevPlanValue;
           earningsFieldset.disabled = !prevPlanValue;
@@ -1151,15 +1164,14 @@
 
     // ── "As of" visibility: shown when lastDay blank, hidden when filled ─
     function syncAsOfVisibility() {
-      document.getElementById('svc-as-of-field').hidden =
-        !!document.getElementById('last-day').value;
+      svcAsOfField.hidden = !!lastDayEl.value;
     }
 
-    document.getElementById('last-day').addEventListener('input', syncAsOfVisibility);
+    lastDayEl.addEventListener('input', syncAsOfVisibility);
 
     // ── Last-day-of-service clear button ─────────────────────────
-    document.getElementById('last-day-clear').addEventListener('click', () => {
-      document.getElementById('last-day').value = '';
+    lastDayClearBtn.addEventListener('click', () => {
+      lastDayEl.value = '';
       syncAsOfVisibility();
       updateReloadLink();
       maybeCalculate();
@@ -1168,34 +1180,31 @@
     // ── Reload link ──────────────────────────────────────────────
     function buildReloadUrl() {
       const params = new URLSearchParams();
-      const add = (key, id) => {
-        const v = document.getElementById(id).value;
-        if (v) params.set(key, v);
-      };
-      add('plan',      'plan');
-      add('dob',       'dob');
-      add('svcYears',  'svc-years');
-      add('svcMonths', 'svc-months');
-      add('svcAsOf',   'svc-as-of');
-      add('lastDay',   'last-day');
-      add('afc',       'manual-afc');
+      const add = (key, el) => { if (el.value) params.set(key, el.value); };
+      add('plan',      planEl);
+      add('dob',       dobEl);
+      add('svcYears',  svcYearsEl);
+      add('svcMonths', svcMonthsEl);
+      add('svcAsOf',   svcAsOfEl);
+      add('lastDay',   lastDayEl);
+      add('afc',       manualAfcEl);
       const qs = params.toString();
       return window.location.pathname + (qs ? '?' + qs : '');
     }
 
     function updateReloadLink() {
-      document.getElementById('reload-link').href = buildReloadUrl();
+      reloadLink.href = buildReloadUrl();
     }
 
-    ['dob', 'svc-years', 'svc-months', 'svc-as-of', 'last-day'].forEach(id =>
-      document.getElementById(id).addEventListener('input', updateReloadLink)
+    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl].forEach(el =>
+      el.addEventListener('input', updateReloadLink)
     );
-    document.getElementById('manual-afc').addEventListener('change', updateReloadLink);
+    manualAfcEl.addEventListener('change', updateReloadLink);
 
     function commitAfc(e) {
       if (e.type === 'keydown' && e.key !== 'Enter') return;
       if (e.type === 'input'   && e.inputType === 'deleteByCut') {
-        document.getElementById('manual-afc').value = '';
+        manualAfcEl.value = '';
         updateReloadLink();
         drawChart();
         return;
@@ -1204,25 +1213,24 @@
       updateReloadLink();
       maybeCalculate();
     }
-    document.getElementById('manual-afc').addEventListener('keydown', commitAfc);
-    document.getElementById('manual-afc').addEventListener('input',   commitAfc);
+    manualAfcEl.addEventListener('keydown', commitAfc);
+    manualAfcEl.addEventListener('input',   commitAfc);
 
     // ── URL parameter pre-fill ────────────────────────────────────
     // Supported params: plan, dob, svcYears, svcMonths, lastDay, afc
     // Example: ?plan=hybrid-post2012&dob=1975-06-15&svcYears=15&svcMonths=3&afc=4500
     {
       const p = new URLSearchParams(window.location.search);
-      const set = (id, key) => { if (p.has(key)) document.getElementById(id).value = p.get(key); };
-      set('plan',       'plan');
-      set('dob',        'dob');
-      set('svc-years',  'svcYears');
-      set('svc-months', 'svcMonths');
-      set('svc-as-of',  'svcAsOf');
-      set('last-day',   'lastDay');
-      set('manual-afc', 'afc');
-      prevPlanValue = document.getElementById('plan').value;
-      document.getElementById('group-earnings-input').disabled =
-        !document.getElementById('plan').value;
+      const set = (el, key) => { if (p.has(key)) el.value = p.get(key); };
+      set(planEl,      'plan');
+      set(dobEl,       'dob');
+      set(svcYearsEl,  'svcYears');
+      set(svcMonthsEl, 'svcMonths');
+      set(svcAsOfEl,   'svcAsOf');
+      set(lastDayEl,   'lastDay');
+      set(manualAfcEl, 'afc');
+      prevPlanValue             = planEl.value;
+      earningsFieldset.disabled = !planEl.value;
       syncAsOfVisibility();
       updateReloadLink();
       if (canCalculate()) requestAnimationFrame(runCalculate);
@@ -1282,13 +1290,13 @@
           g.append('rect')
             .attr('x', 0).attr('y', 0)
             .attr('width', shadedX2).attr('height', iH)
-            .attr('fill', '#f5f5f5');
+            .attr('fill', CHART.colorIneligible);
           if (shadedX2 > 30) {
             g.append('text')
               .attr('transform', `translate(${shadedX2 / 2},${iH / 2}) rotate(-90)`)
               .attr('text-anchor', 'middle')
-              .attr('font-family', 'monospace').attr('font-size', '0.75rem')
-              .attr('fill', '#bbb')
+              .attr('font-family', CHART.font).attr('font-size', '0.75rem')
+              .attr('fill', CHART.colorMinor)
               .text('Not yet eligible');
           }
         }
@@ -1298,45 +1306,45 @@
       g.append('g').selectAll('line').data(xMajorVals).join('line')
         .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
         .attr('y1', 0).attr('y2', iH)
-        .attr('stroke', '#e0e0e0').attr('stroke-width', 1);
+        .attr('stroke', CHART.colorGrid).attr('stroke-width', 1);
 
       g.append('g').selectAll('line').data(xMajorVals).join('line')
         .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
         .attr('y1', iH).attr('y2', iH + 6)
-        .attr('stroke', '#555').attr('stroke-width', 1);
+        .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
 
       g.append('g').selectAll('text').data(xMajorVals).join('text')
         .attr('x', d => xScale(d)).attr('y', iH + 18)
         .attr('text-anchor', 'middle')
-        .attr('font-family', 'monospace').attr('font-size', '0.75rem').attr('fill', '#333')
+        .attr('font-family', CHART.font).attr('font-size', '0.75rem').attr('fill', CHART.colorLabel)
         .text(d => d.getFullYear());
 
       g.append('g').selectAll('line').data(xMinorVals).join('line')
         .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
         .attr('y1', iH).attr('y2', iH + 3)
-        .attr('stroke', '#bbb').attr('stroke-width', 0.5);
+        .attr('stroke', CHART.colorMinor).attr('stroke-width', 0.5);
 
       // ── Y axis (monthly pension) ────────────────────────────────
       g.append('g').selectAll('line').data(yMajorVals).join('line')
         .attr('x1', 0).attr('x2', iW)
         .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
-        .attr('stroke', '#e0e0e0').attr('stroke-width', 1);
+        .attr('stroke', CHART.colorGrid).attr('stroke-width', 1);
 
       g.append('g').selectAll('line').data(yMajorVals).join('line')
         .attr('x1', -6).attr('x2', 0)
         .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
-        .attr('stroke', '#555').attr('stroke-width', 1);
+        .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
 
       g.append('g').selectAll('text').data(yMajorVals).join('text')
         .attr('x', -10).attr('y', d => yScale(d))
         .attr('dy', '0.32em').attr('text-anchor', 'end')
-        .attr('font-family', 'monospace').attr('font-size', '0.75rem').attr('fill', '#333')
+        .attr('font-family', CHART.font).attr('font-size', '0.75rem').attr('fill', CHART.colorLabel)
         .text(d => d === 0 ? '$0' : `$${d / 1000}k`);
 
       g.append('g').selectAll('line').data(yMinorVals).join('line')
         .attr('x1', -3).attr('x2', 0)
         .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
-        .attr('stroke', '#bbb').attr('stroke-width', 0.5);
+        .attr('stroke', CHART.colorMinor).attr('stroke-width', 0.5);
 
       // ── Curve ───────────────────────────────────────────────────
       if (series && series.length) {
@@ -1352,7 +1360,7 @@
           .append('path')
           .datum(series)
           .attr('fill', 'none')
-          .attr('stroke', '#0066cc')
+          .attr('stroke', CHART.colorLine)
           .attr('stroke-width', 1.5)
           .attr('d', line);
       }
@@ -1360,56 +1368,55 @@
       // ── Axis baselines ──────────────────────────────────────────
       g.append('line')
         .attr('x1', 0).attr('x2', iW).attr('y1', iH).attr('y2', iH)
-        .attr('stroke', '#555').attr('stroke-width', 1);
+        .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
       g.append('line')
         .attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', iH)
-        .attr('stroke', '#555').attr('stroke-width', 1);
+        .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
 
       // ── Axis labels ─────────────────────────────────────────────
       g.append('text')
         .attr('x', iW / 2).attr('y', iH + 42)
         .attr('text-anchor', 'middle')
-        .attr('font-family', 'monospace').attr('font-size', '0.8rem').attr('fill', '#333')
+        .attr('font-family', CHART.font).attr('font-size', '0.8rem').attr('fill', CHART.colorLabel)
         .text('Retirement Date');
 
       g.append('text')
         .attr('transform', `translate(${-(margin.left - 14)},${iH / 2}) rotate(-90)`)
         .attr('text-anchor', 'middle')
-        .attr('font-family', 'monospace').attr('font-size', '0.8rem').attr('fill', '#333')
+        .attr('font-family', CHART.font).attr('font-size', '0.8rem').attr('fill', CHART.colorLabel)
         .text('Monthly Pension — Maximum Allowance ($/month)');
 
       // ── Chart title ─────────────────────────────────────────────
       svg.append('text')
         .attr('x', margin.left + iW / 2).attr('y', 16)
         .attr('text-anchor', 'middle')
-        .attr('font-family', 'monospace').attr('font-size', '0.85rem').attr('font-weight', 'bold')
-        .attr('fill', '#222')
+        .attr('font-family', CHART.font).attr('font-size', '0.85rem').attr('font-weight', 'bold')
+        .attr('fill', CHART.colorTitle)
         .text('ERS Monthly Pension vs. Retirement Date');
 
       // ── Tooltip ──────────────────────────────────────────────────
       if (eligible.length) {
-        const MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         const bisect  = d3.bisector(d => d.retDate).left;
 
         const tip = g.append('g').attr('display', 'none');
 
         tip.append('line').attr('class', 'tip-v')
           .attr('y1', 0).attr('y2', iH)
-          .attr('stroke', '#aaa').attr('stroke-width', 1).attr('stroke-dasharray', '4,3');
+          .attr('stroke', CHART.colorCrosshair).attr('stroke-width', 1).attr('stroke-dasharray', '4,3');
 
         tip.append('line').attr('class', 'tip-h')
           .attr('x1', 0).attr('x2', iW)
-          .attr('stroke', '#aaa').attr('stroke-width', 1).attr('stroke-dasharray', '4,3');
+          .attr('stroke', CHART.colorCrosshair).attr('stroke-width', 1).attr('stroke-dasharray', '4,3');
 
         tip.append('circle').attr('class', 'tip-dot')
-          .attr('r', 3.5).attr('fill', '#0066cc');
+          .attr('r', 3.5).attr('fill', CHART.colorLine);
 
         const tipLabel = tip.append('g');
         const tipRect  = tipLabel.append('rect')
-          .attr('fill', 'white').attr('stroke', '#bbb').attr('rx', 3);
+          .attr('fill', 'white').attr('stroke', CHART.colorMinor).attr('rx', 3);
         const tipText  = tipLabel.append('text')
-          .attr('font-family', 'monospace').attr('font-size', '0.75rem')
-          .attr('fill', '#222').attr('dominant-baseline', 'hanging');
+          .attr('font-family', CHART.font).attr('font-size', '0.75rem')
+          .attr('fill', CHART.colorTitle).attr('dominant-baseline', 'hanging');
 
         // Transparent overlay — must be last so it sits on top for event capture.
         g.append('rect')
