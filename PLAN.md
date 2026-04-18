@@ -115,19 +115,22 @@ An optional **"Last day of service"** date input covers the non-default cases
 service). When left blank, service accrues through the retirement date.
 
 ```js
-// today        = current date (runtime)
+// asOfDate     = reference date for the entered service figure:
+//                  lastDayOfSvc (when set) — service is static, accrual = 0
+//                  svcAsOf field value (when lastDay is blank) — accrues forward
 // lastDayOfSvc = optional Date from form input; null = still active
 // retDate      = candidate retirement month (1st of that month)
-// currentSvcMonths = credited service as of today (from form)
+// enteredSvcMonths = credited service as reported by ERS (as of asOfDate)
 
 const accrualEnd = lastDayOfSvc
   ? new Date(Math.min(lastDayOfSvc.getTime(), retDate.getTime()))
   : retDate;
-const serviceAtM = currentSvcMonths + Math.max(0, monthsBetween(today, accrualEnd));
+const serviceAtM = enteredSvcMonths + Math.max(0, monthsBetween(asOfDate, accrualEnd));
 ```
 
 `monthsBetween` counts whole calendar months (same day-of-month logic as
-`addMonths`).
+`addMonths`). When `asOfDate === lastDayOfSvc`, `accrualEnd = lastDayOfSvc` and
+`monthsBetween` = 0, giving static service.
 
 ---
 
@@ -314,13 +317,41 @@ plan-change prompt + revert-on-cancel.
 **Goal**: Implement and inline-test three pure functions:
 - `monthsBetween(a, b)` — whole calendar months from Date a to Date b
 - `fractionalAge(dob, date)` — age in fractional years
-- `serviceAtMonth(currentMonths, today, retDate, lastDayOfSvc)` — accrual with
-  optional cap; `lastDayOfSvc = null` means still active
+- `serviceAtMonth(enteredMonths, asOfDate, retDate, lastDayOfSvc)` — accrual
+  from `asOfDate` to `min(lastDayOfSvc, retDate)` (or to `retDate` when
+  `lastDayOfSvc` is null); `Math.max(0, ...)` prevents negative deltas
 
 Render a small verification table directly on the page (no test framework) with
 a handful of known-answer cases for each function
 **Verify**: All rows in the table show expected values; no surprises at month
 boundaries (e.g. same day next month = exactly 1 month)
+**Status**: Complete
+
+---
+
+### Stage 4b: "As of" date field + service reference wiring
+**Goal**: Add an "as of" date input for credited service; enforce that at least
+one of "as of" or "last day of service" is provided before Calculate enables.
+
+- Add `#svc-as-of` date input adjacent to the service years/months fields;
+  visible when `#last-day` is blank, hidden when `#last-day` is filled
+- Clearing `#last-day` (via ✕ or manual edit) reveals `#svc-as-of`; filling
+  `#last-day` hides it — stale `asOf` value is ignored; `lastDay` itself serves
+  as the implicit reference date when set
+- Calculate button enable: `group1Ok` requires plan + DOB + (`lastDay` non-blank
+  OR `asOf` non-blank)
+- Resolved reference date passed into `serviceAtMonth`:
+  - `lastDay` set → `asOfDate = lastDay` (service is static; accrual = 0)
+  - `lastDay` blank → `asOfDate = asOf`
+
+**Verify**:
+- On load with no URL params: "as of" visible, Calculate disabled (neither date set)
+- Filling `lastDay` hides "as of"; clearing it restores "as of"
+- `lastDay` set, service entered, DOB + plan filled: Calculate enables; curve shows
+  flat static service across all retirement dates
+- `lastDay` blank, `asOf` set: Calculate enables; service accrues forward from
+  `asOf` date on each candidate month
+- Both blank: Calculate stays disabled despite plan + DOB + AFC being filled
 **Status**: Not Started
 
 ---
