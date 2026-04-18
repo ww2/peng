@@ -118,7 +118,7 @@
       margin-bottom: 1.25rem;
     }
 
-    #calc-btn {
+    #calc-btn, #clear-btn {
       font-family: monospace;
       font-size: 0.95rem;
       padding: 0.35rem 1rem;
@@ -259,6 +259,7 @@
   <!-- ── Calculate ────────────────────────────────────────────── -->
   <div id="action-row">
     <button id="calc-btn" disabled>Calculate</button>
+    <button id="clear-btn" type="button">Clear</button>
     <span id="status-line"></span>
   </div>
 
@@ -426,7 +427,6 @@
       lastWindows = windows;
 
       debugDetails.classList.remove('disabled');
-      window.afcComputed = null;
       computeAndFillAfc();
       updateCalcBtn();
     });
@@ -745,14 +745,6 @@
     }
 
     // ── AFC pipeline ─────────────────────────────────────────────
-    function typeRank(k) {
-      return k === 'Regular' ? 0 : k.includes('Overtime') ? 1 : k.includes('Night') ? 2 : 3;
-    }
-
-    function typeSort(a, b) {
-      return typeRank(a) - typeRank(b) || a.localeCompare(b);
-    }
-
     function fmtMoney(v) {
       return v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     }
@@ -874,6 +866,8 @@
       if (!result) return;
       document.getElementById('manual-afc').value = (result.total / config.N / 12).toFixed(2);
       updateCalcBtn();
+      updateReloadLink();
+      if (!document.getElementById('calc-btn').disabled) runCalculate();
     }
 
     // ── Display helpers ──────────────────────────────────────────
@@ -1050,10 +1044,6 @@
     }
 
     // ── State ────────────────────────────────────────────────────
-    // afcComputed is set by Stage 2 when extraction succeeds.
-    // Exposed on window so later stages can set it and call updateCalcBtn().
-    window.afcComputed = null;
-
     // Tracks the last committed plan value so we can revert on cancel.
     let prevPlanValue = '';
 
@@ -1066,7 +1056,7 @@
          document.getElementById('svc-as-of').value)
       );
       const manualAfc = parseFloat(document.getElementById('manual-afc').value);
-      const group2Ok = (window.afcComputed !== null) || (manualAfc > 0);
+      const group2Ok = manualAfc > 0;
       document.getElementById('calc-btn').disabled = !(group1Ok && group2Ok);
     }
 
@@ -1102,6 +1092,45 @@
     }
 
     document.getElementById('calc-btn').addEventListener('click', runCalculate);
+
+    function runClear() {
+      // Form inputs
+      ['plan', 'dob', 'svc-years', 'svc-months', 'svc-as-of', 'last-day', 'manual-afc'].forEach(id => {
+        document.getElementById(id).value = '';
+      });
+
+      // PDF picker state
+      pdfFiles        = {};
+      lastStubs       = [];
+      lastWindows     = [];
+      cancelRequested = false;
+
+      // Picker UI
+      document.getElementById('picker').value          = '';
+      document.getElementById('picker-path').textContent = '';
+      document.getElementById('afc-computed').textContent = '';
+      document.getElementById('afc-date-range').textContent = '';
+
+      // Debug panel
+      const debugDetails = document.getElementById('debug-details');
+      debugDetails.open = false;
+      debugDetails.classList.add('disabled');
+      document.getElementById('debug-body').innerHTML = '';
+
+      // Group 2 fieldset, prevPlanValue, status line
+      document.getElementById('group-earnings-input').disabled = true;
+      prevPlanValue = '';
+      document.getElementById('status-line').textContent = '';
+
+      // "As of" field visibility
+      syncAsOfVisibility();
+
+      updateCalcBtn();
+      updateReloadLink();
+      drawChart();
+    }
+
+    document.getElementById('clear-btn').addEventListener('click', runClear);
 
     document.getElementById('plan').addEventListener('input', () => {
       const planEl = document.getElementById('plan');
