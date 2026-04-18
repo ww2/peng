@@ -1322,6 +1322,26 @@
       const yMajorVals = d3.range(yMin, yMax + 1, 1000);
       const yMinorVals = d3.range(yMin, yMax + 1, 100).filter(v => v % 1000 !== 0);
 
+      // ── Ineligible region shading ───────────────────────────────
+      if (series && series.length) {
+        const firstEligible = series.find(d => d.pension !== null);
+        const shadedX2 = firstEligible ? xScale(firstEligible.retDate) : iW;
+        if (shadedX2 > 0) {
+          g.append('rect')
+            .attr('x', 0).attr('y', 0)
+            .attr('width', shadedX2).attr('height', iH)
+            .attr('fill', '#f5f5f5');
+          if (shadedX2 > 30) {
+            g.append('text')
+              .attr('transform', `translate(${shadedX2 / 2},${iH / 2}) rotate(-90)`)
+              .attr('text-anchor', 'middle')
+              .attr('font-family', 'monospace').attr('font-size', '0.75rem')
+              .attr('fill', '#bbb')
+              .text('Not yet eligible');
+          }
+        }
+      }
+
       // ── X axis (retirement date) ────────────────────────────────
       g.append('g').selectAll('line').data(xMajorVals).join('line')
         .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))

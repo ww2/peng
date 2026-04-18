@@ -329,7 +329,7 @@ boundaries (e.g. same day next month = exactly 1 month)
 
 ---
 
-### Stage 4b: "As of" date field + service reference wiring
+### Stage 5: "As of" date field + service reference wiring
 **Goal**: Add an "as of" date input for credited service; enforce that at least
 one of "as of" or "last day of service" is provided before Calculate enables.
 
@@ -356,7 +356,7 @@ one of "as of" or "last day of service" is provided before Calculate enables.
 
 ---
 
-### Stage 5: Pension series for Noncontributory (table output)
+### Stage 6: Pension series for Noncontributory (table output)
 **Goal**: Implement `calculateSeries(params)` for `noncontributory` only;
 render output as a plain HTML table — one row per candidate month showing:
 retirement date | service months | whole age | status (normal/early/ineligible) | pension
@@ -370,7 +370,7 @@ retirement date | service months | whole age | status (normal/early/ineligible) 
 
 ---
 
-### Stage 6: D3 axes (no data)
+### Stage 7: D3 axes (no data)
 **Goal**: Replace the chart placeholder with a real SVG; render X and Y axes
 with correct tick structure but hardcoded ranges (X: today to today+15 years;
 Y: $0–$5,000)
@@ -381,9 +381,9 @@ $100 unlabeled; earlier dates on the left; no data yet
 
 ---
 
-### Stage 7: Pension curve (hardcoded ranges)
+### Stage 8: Pension curve (hardcoded ranges)
 **Goal**: Feed `calculateSeries` output (noncontributory) into the chart as a
-`d3.line()` over the hardcoded axes from Stage 6; use
+`d3.line()` over the hardcoded axes from Stage 7; use
 `line.defined(d => d.pension !== null)` for gaps
 **Verify**: Line visible over existing axes; staircase steps clearly visible in
 early retirement window; line resumes after each step; line absent (gap) for
@@ -392,7 +392,7 @@ ineligible months; service-driven upward slope visible for active employees
 
 ---
 
-### Stage 8: Dynamic axis ranges
+### Stage 9: Dynamic axis ranges
 **Goal**: Replace hardcoded axis ranges with data-driven ones — X from first
 candidate month to 10 years past earliest normal retirement date; Y from the
 nearest $1,000 floor below the minimum pension to the nearest $1,000 ceiling
@@ -403,16 +403,27 @@ pension range; X bounds are tight to the data; staircase and gaps still correct
 
 ---
 
-### Stage 9: Ineligible region shading
+### Stage 10: Ineligible region shading
 **Goal**: Add a shaded `<rect>` covering the Y range of ineligible months
 behind the curve, with a "Not yet eligible" label
 **Verify**: Shading covers exactly the ineligible date range and stops where
 the curve begins; label readable; curve renders on top of shading
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
-### Stage 10: Pension series + chart for all plan variants
+### Stage 11: Full form wiring + Calculate button
+**Goal**: Wire all form inputs (plan variant, DOB, service years/months, last
+day of service) to `calculateSeries`; Calculate button renders the chart; debug
+series table from Stages 6 & 12 remains visible for cross-checking
+**Verify**:
+- Changing any input and clicking Calculate updates the chart
+- Blank "last day of service" → active-employee accrual; filled date → service caps
+**Status**: Complete (implemented progressively across Stages 6 and 8)
+
+---
+
+### Stage 12: Pension series + chart for all plan variants
 **Goal**: Extend `calculateSeries` to cover all five plan variants; chart and
 debug table both update when the plan dropdown changes and Calculate is clicked
 **Verify**:
@@ -427,18 +438,7 @@ debug table both update when the plan dropdown changes and Calculate is clicked
 
 ---
 
-### Stage 11: Full form wiring + Calculate button
-**Goal**: Wire all form inputs (plan variant, DOB, service years/months, last
-day of service) to `calculateSeries`; Calculate button renders the chart; debug
-series table from Stages 5 & 10 remains visible for cross-checking
-**Verify**:
-- Changing any input and clicking Calculate updates the chart
-- Blank "last day of service" → active-employee accrual; filled date → service caps
-**Status**: Not Started
-
----
-
-### Stage 12: Remove debug table + status line
+### Stage 13: Remove debug table + status line
 **Goal**: Remove the debug series table; add a status line showing validation
 errors or "No eligible retirement dates found" when the series is empty
 **Verify**:
@@ -449,7 +449,7 @@ errors or "No eligible retirement dates found" when the series is empty
 
 ---
 
-### Stage 13: Hover tooltip
+### Stage 14: Hover tooltip
 **Goal**: On mouse move over the chart, draw vertical + horizontal crosshair
 lines snapped to the nearest data point and show a label ("May 2031 — $2,847/mo")
 **Verify**: Tooltip appears on hover; snaps correctly to data points; disappears
