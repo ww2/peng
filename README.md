@@ -1,1 +1,1 @@
-Attempting to display a simple graph showing pension amount vs retirement date.
+Generates a simple graph showing estimated pension amount vs retirement date
