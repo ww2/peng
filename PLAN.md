@@ -366,7 +366,7 @@ retirement date | service months | whole age | status (normal/early/ineligible) 
   birthday and is flat between birthdays (confirming the staircase)
 - Rows at age 62 w/10 yos (or age 55 w/30 yos) show `normal`; penalty gone
 - Active-employee rows: service column increases month-by-month
-**Status**: Not Started
+**Status**: Complete
 
 ---
 

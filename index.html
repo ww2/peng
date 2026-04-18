@@ -265,6 +265,12 @@
   <!-- ── Chart ────────────────────────────────────────────────── -->
   <svg id="chart-svg"></svg>
 
+  <!-- ── Series table (Stage 5–6 debug) ──────────────────────── -->
+  <details id="series-details" style="margin-top:1rem; font-size:0.8rem;" hidden>
+    <summary style="cursor:pointer; color:#0066cc; user-select:none;">Series table</summary>
+    <div id="series-table-container" style="margin-top:0.4rem; max-height:400px; overflow:auto;"></div>
+  </details>
+
   <!-- ── Stage 4 verification ─────────────────────────────────── -->
   <details id="stage4-verify" style="margin-top:1rem; font-size:0.8rem;">
     <summary style="cursor:pointer; color:#0066cc; user-select:none;">Stage 4 — utility function verification</summary>
@@ -633,7 +639,10 @@
 
     function addMonths(date, n) {
       const d = new Date(date);
+      const targetMonth = ((d.getMonth() + n) % 12 + 12) % 12;
       d.setMonth(d.getMonth() + n);
+      // If the day overflowed into the wrong month, clamp to the last day of the intended month.
+      if (d.getMonth() !== targetMonth) d.setDate(0);
       return d;
     }
 
@@ -673,6 +682,51 @@
         ? new Date(Math.min(lastDayOfSvc.getTime(), retDate.getTime()))
         : retDate;
       return enteredMonths + Math.max(0, monthsBetween(asOfDate, accrualEnd));
+    }
+
+    // Parse YYYY-MM-DD (from <input type="date">) as a local date.
+    function parseIsoDate(s) {
+      const [y, m, d] = s.split('-');
+      return new Date(+y, +m - 1, +d);
+    }
+
+    // ── Pension series ───────────────────────────────────────────
+    // Returns an array of rows, one per candidate retirement month, from the
+    // 1st of next month through 10 years past the first normal retirement month.
+    // Stage 5: noncontributory eligibility only (generalized in Stage 6).
+    function calculateSeries({ plan, dob, enteredSvcMonths, asOfDate, lastDayOfSvc, afcMonthly }) {
+      const config = PLAN_CONFIGS[plan];
+      const today  = new Date();
+      const start  = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+
+      const rows = [];
+      let firstNormalDate = null;
+
+      for (let m = 0; m < 600; m++) {   // 50-year hard ceiling
+        const retDate = addMonths(start, m);
+        const svcAtM  = serviceAtMonth(enteredSvcMonths, asOfDate, retDate, lastDayOfSvc);
+        const ageAtM  = fractionalAge(dob, retDate);
+
+        const isNormal = (ageAtM >= 62 && svcAtM >= 120) || (ageAtM >= 55 && svcAtM >= 360);
+        const isEarly  = !isNormal && ageAtM >= 55 && svcAtM >= 240;
+
+        let pension = null;
+        if (isNormal || isEarly) {
+          // normalRetAge is 55 once the 55/30 threshold is met, otherwise 62.
+          const normalRetAge = (svcAtM >= 360 && ageAtM >= 55) ? 55 : 62;
+          const yearsEarly   = Math.max(0, normalRetAge - Math.floor(ageAtM));
+          const factor       = Math.max(0, 1 - 0.06 * yearsEarly);
+          pension = config.multiplier * (svcAtM / 12) * afcMonthly * factor;
+        }
+
+        const status = isNormal ? 'normal' : isEarly ? 'early' : 'ineligible';
+        rows.push({ retDate, svcAtM, ageAtM, status, pension });
+
+        if (status === 'normal' && !firstNormalDate) firstNormalDate = retDate;
+        if (firstNormalDate && retDate >= addMonths(firstNormalDate, 120)) break;
+      }
+
+      return rows;
     }
 
     // ── AFC pipeline ─────────────────────────────────────────────
@@ -980,6 +1034,54 @@
       return wrapper;
     }
 
+    // ── Series table rendering ───────────────────────────────────
+    const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const STATUS_COLOR = { normal: 'green', early: '#884400', ineligible: '#999' };
+
+    function renderSeriesTable(rows) {
+      const table = document.createElement('table');
+      table.style.cssText = 'border-collapse:collapse; font-family:monospace; font-size:0.8rem; width:100%;';
+
+      const thead = table.createTHead().insertRow();
+      for (const h of ['Retirement date', 'Service (mo)', 'Age', 'Status', 'Pension/mo']) {
+        const th = document.createElement('th');
+        th.textContent = h;
+        th.style.cssText =
+          'text-align:left; padding:0.15rem 0.7rem; border-bottom:1px solid #ccc;' +
+          'position:sticky; top:0; background:#fff;';
+        thead.appendChild(th);
+      }
+
+      let prevStatus = null;
+      for (const { retDate, svcAtM, ageAtM, status, pension } of rows) {
+        const tr = table.insertRow();
+        if (prevStatus !== null && status !== prevStatus)
+          tr.style.borderTop = '2px solid #bbb';
+        prevStatus = status;
+
+        const cells = [
+          `${MONTH_NAMES[retDate.getMonth()]} ${retDate.getFullYear()}`,
+          String(svcAtM),
+          String(Math.floor(ageAtM)),
+          status,
+          pension !== null ? `$${fmtMoney(pension)}` : '',
+        ];
+        cells.forEach((text, i) => {
+          const td = tr.insertCell();
+          td.textContent = text;
+          td.style.cssText =
+            `padding:0.1rem 0.7rem;${i === 3 ? ` color:${STATUS_COLOR[status]};` : ''}`;
+        });
+      }
+
+      const container = document.getElementById('series-table-container');
+      container.innerHTML = '';
+      container.appendChild(table);
+      const details = document.getElementById('series-details');
+      details.hidden = false;
+      details.open   = true;
+    }
+
     // ── State ────────────────────────────────────────────────────
     // afcComputed is set by Stage 2 when extraction succeeds.
     // Exposed on window so later stages can set it and call updateCalcBtn().
@@ -1004,6 +1106,29 @@
     ['dob', 'svc-years', 'svc-months', 'manual-afc', 'svc-as-of', 'last-day'].forEach(id =>
       document.getElementById(id).addEventListener('input', updateCalcBtn)
     );
+
+    document.getElementById('calc-btn').addEventListener('click', () => {
+      const plan       = document.getElementById('plan').value;
+      const svcYears   = parseInt(document.getElementById('svc-years').value)  || 0;
+      const svcMonths  = parseInt(document.getElementById('svc-months').value) || 0;
+      const lastDayVal = document.getElementById('last-day').value;
+      const asOfVal    = document.getElementById('svc-as-of').value;
+
+      const dob          = parseIsoDate(document.getElementById('dob').value);
+      const lastDayOfSvc = lastDayVal ? parseIsoDate(lastDayVal) : null;
+      const asOfDate     = lastDayOfSvc ?? parseIsoDate(asOfVal);
+      const afcMonthly   = parseFloat(document.getElementById('manual-afc').value);
+
+      const series = calculateSeries({
+        plan,
+        dob,
+        enteredSvcMonths: svcYears * 12 + svcMonths,
+        asOfDate,
+        lastDayOfSvc,
+        afcMonthly,
+      });
+      renderSeriesTable(series);
+    });
 
     document.getElementById('plan').addEventListener('input', () => {
       const planEl = document.getElementById('plan');
