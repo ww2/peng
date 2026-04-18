@@ -26,7 +26,7 @@ Status: Complete
 Goal: Delete the `fmt` closure inside `formatFields` and call the module-level `fmtMoney` instead.
 Lines: 898 (local `fmt`), 901–904 (call sites)
 Test: Click a file link in the paystub list; verify the fields panel shows correctly-formatted money values.
-Status: Not Started
+Status: Complete
 
 ---
 

@@ -118,14 +118,12 @@
       margin-bottom: 1.25rem;
     }
 
-    #calc-btn, #clear-btn {
+    #clear-btn {
       font-family: monospace;
       font-size: 0.95rem;
       padding: 0.35rem 1rem;
       cursor: pointer;
     }
-
-    #calc-btn:disabled { cursor: not-allowed; }
 
     #status-line { font-size: 0.85rem; color: #c00; }
     #status-line:empty { display: none; }
@@ -258,7 +256,6 @@
 
   <!-- ── Calculate ────────────────────────────────────────────── -->
   <div id="action-row">
-    <button id="calc-btn" disabled>Calculate</button>
     <button id="clear-btn" type="button">Clear</button>
     <span id="status-line"></span>
   </div>
@@ -313,7 +310,8 @@
 
       // Clear any previously computed AFC immediately.
       document.getElementById('manual-afc').value = '';
-      updateCalcBtn();
+      updateReloadLink();
+      maybeCalculate();
 
       const afcComputedEl = document.getElementById('afc-computed');
       const debugBody     = document.getElementById('debug-body');
@@ -353,7 +351,6 @@
         lastStubs   = [];
         lastWindows = [];
         pdfFiles    = {};
-        updateCalcBtn();
         return;
       }
 
@@ -428,7 +425,8 @@
 
       debugDetails.classList.remove('disabled');
       computeAndFillAfc();
-      updateCalcBtn();
+      updateReloadLink();
+      maybeCalculate();
     });
 
     // ── PDF parsing constants ─────────────────────────────────────
@@ -865,9 +863,6 @@
       const result = solveDP(scored, config.N);
       if (!result) return;
       document.getElementById('manual-afc').value = (result.total / config.N / 12).toFixed(2);
-      updateCalcBtn();
-      updateReloadLink();
-      if (!document.getElementById('calc-btn').disabled) runCalculate();
     }
 
     // ── Display helpers ──────────────────────────────────────────
@@ -889,13 +884,11 @@
         return `${label.padEnd(12)} ${found}`;
       };
 
-      const fmt = v => v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-
       const earningsLines = Object.entries(result.currentEarnings)
         .map(([k, v]) => {
           const ytd = result.ytdEarnings[k];
-          return `  ${k.padEnd(32)} current: ${fmt(v).padStart(10)}` +
-                 (ytd != null ? `   ytd: ${fmt(ytd).padStart(10)}` : '');
+          return `  ${k.padEnd(32)} current: ${fmtMoney(v).padStart(10)}` +
+                 (ytd != null ? `   ytd: ${fmtMoney(ytd).padStart(10)}` : '');
         });
 
       return [
@@ -1047,8 +1040,8 @@
     // Tracks the last committed plan value so we can revert on cancel.
     let prevPlanValue = '';
 
-    // ── Calculate button enable logic ────────────────────────────
-    function updateCalcBtn() {
+    // ── Reactive calculate logic ──────────────────────────────────
+    function canCalculate() {
       const group1Ok = !!(
         document.getElementById('plan').value &&
         document.getElementById('dob').value &&
@@ -1056,13 +1049,17 @@
          document.getElementById('svc-as-of').value)
       );
       const manualAfc = parseFloat(document.getElementById('manual-afc').value);
-      const group2Ok = manualAfc > 0;
-      document.getElementById('calc-btn').disabled = !(group1Ok && group2Ok);
+      return group1Ok && manualAfc > 0;
     }
 
-    ['dob', 'svc-years', 'svc-months', 'manual-afc', 'svc-as-of', 'last-day'].forEach(id =>
-      document.getElementById(id).addEventListener('input', updateCalcBtn)
+    function maybeCalculate() {
+      if (canCalculate()) runCalculate(); else drawChart();
+    }
+
+    ['dob', 'svc-years', 'svc-months', 'svc-as-of', 'last-day'].forEach(id =>
+      document.getElementById(id).addEventListener('input', maybeCalculate)
     );
+    document.getElementById('manual-afc').addEventListener('change', maybeCalculate);
 
     function runCalculate() {
       const plan       = document.getElementById('plan').value;
@@ -1090,8 +1087,6 @@
         ? 'No eligible retirement dates found.' : '';
       drawChart(series);
     }
-
-    document.getElementById('calc-btn').addEventListener('click', runCalculate);
 
     function runClear() {
       // Form inputs
@@ -1125,7 +1120,6 @@
       // "As of" field visibility
       syncAsOfVisibility();
 
-      updateCalcBtn();
       updateReloadLink();
       drawChart();
     }
@@ -1142,8 +1136,8 @@
         if (!confirm('Changing the plan will recompute your Monthly AFC. Continue?')) {
           planEl.value = prevPlanValue;
           earningsFieldset.disabled = !prevPlanValue;
-          updateCalcBtn();
           updateReloadLink();
+          maybeCalculate();
           return;
         }
       }
@@ -1151,8 +1145,8 @@
       prevPlanValue = newVal;
       earningsFieldset.disabled = !newVal;
       computeAndFillAfc();
-      updateCalcBtn();
       updateReloadLink();
+      maybeCalculate();
     });
 
     // ── "As of" visibility: shown when lastDay blank, hidden when filled ─
@@ -1167,8 +1161,8 @@
     document.getElementById('last-day-clear').addEventListener('click', () => {
       document.getElementById('last-day').value = '';
       syncAsOfVisibility();
-      updateCalcBtn();
       updateReloadLink();
+      maybeCalculate();
     });
 
     // ── Reload link ──────────────────────────────────────────────
@@ -1193,9 +1187,25 @@
       document.getElementById('reload-link').href = buildReloadUrl();
     }
 
-    ['dob', 'svc-years', 'svc-months', 'svc-as-of', 'last-day', 'manual-afc'].forEach(id =>
+    ['dob', 'svc-years', 'svc-months', 'svc-as-of', 'last-day'].forEach(id =>
       document.getElementById(id).addEventListener('input', updateReloadLink)
     );
+    document.getElementById('manual-afc').addEventListener('change', updateReloadLink);
+
+    function commitAfc(e) {
+      if (e.type === 'keydown' && e.key !== 'Enter') return;
+      if (e.type === 'input'   && e.inputType === 'deleteByCut') {
+        document.getElementById('manual-afc').value = '';
+        updateReloadLink();
+        drawChart();
+        return;
+      }
+      if (e.type === 'input'   && e.inputType !== 'insertFromPaste') return;
+      updateReloadLink();
+      maybeCalculate();
+    }
+    document.getElementById('manual-afc').addEventListener('keydown', commitAfc);
+    document.getElementById('manual-afc').addEventListener('input',   commitAfc);
 
     // ── URL parameter pre-fill ────────────────────────────────────
     // Supported params: plan, dob, svcYears, svcMonths, lastDay, afc
@@ -1214,10 +1224,8 @@
       document.getElementById('group-earnings-input').disabled =
         !document.getElementById('plan').value;
       syncAsOfVisibility();
-      updateCalcBtn();
       updateReloadLink();
-      if (!document.getElementById('calc-btn').disabled)
-        requestAnimationFrame(runCalculate);
+      if (canCalculate()) requestAnimationFrame(runCalculate);
     }
     // ── Chart ────────────────────────────────────────────────────
     function drawChart(series = null) {
