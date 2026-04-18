@@ -434,7 +434,7 @@ debug table both update when the plan dropdown changes and Calculate is clicked
   (confirm: rows below age 55 with 25+ yos show `early`, not `ineligible`)
 - Dual-threshold plans: confirm `normal` fires on whichever condition is met first
 - Chart curve and staircase shape correct for each plan variant
-**Status**: Not Started
+**Status**: Complete
 
 ---
 

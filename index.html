@@ -693,7 +693,6 @@
     // ── Pension series ───────────────────────────────────────────
     // Returns an array of rows, one per candidate retirement month, from the
     // 1st of next month through 10 years past the first normal retirement month.
-    // Stage 5: noncontributory eligibility only (generalized in Stage 6).
     function calculateSeries({ plan, dob, enteredSvcMonths, asOfDate, lastDayOfSvc, afcMonthly }) {
       const config = PLAN_CONFIGS[plan];
       const today  = new Date();
@@ -707,15 +706,43 @@
         const svcAtM  = serviceAtMonth(enteredSvcMonths, asOfDate, retDate, lastDayOfSvc);
         const ageAtM  = fractionalAge(dob, retDate);
 
-        const isNormal = (ageAtM >= 62 && svcAtM >= 120) || (ageAtM >= 55 && svcAtM >= 360);
-        const isEarly  = !isNormal && ageAtM >= 55 && svcAtM >= 240;
+        let isNormal, isEarly, normalRetAge;
+        switch (plan) {
+          case 'hybrid-post2012':
+            // Normal: 65/10 yos OR 60/30 yos.  Early: 55/20 yos.
+            isNormal     = (ageAtM >= 65 && svcAtM >= 120) || (ageAtM >= 60 && svcAtM >= 360);
+            isEarly      = !isNormal && ageAtM >= 55 && svcAtM >= 240;
+            normalRetAge = svcAtM >= 360 ? 60 : 65;
+            break;
+          case 'hybrid-pre2012':
+            // Normal: 62/5 yos OR 55/30 yos.  Early: 55/20 yos.
+            isNormal     = (ageAtM >= 62 && svcAtM >= 60) || (ageAtM >= 55 && svcAtM >= 360);
+            isEarly      = !isNormal && ageAtM >= 55 && svcAtM >= 240;
+            normalRetAge = svcAtM >= 360 ? 55 : 62;
+            break;
+          case 'contributory-post2012':
+            // Normal: 60/10 yos.  Early: 55/25 yos.
+            isNormal     = ageAtM >= 60 && svcAtM >= 120;
+            isEarly      = !isNormal && ageAtM >= 55 && svcAtM >= 300;
+            normalRetAge = 60;
+            break;
+          case 'contributory-pre2012':
+            // Normal: 55/5 yos.  Early: any age/25 yos.  Penalty below age 55.
+            isNormal     = ageAtM >= 55 && svcAtM >= 60;
+            isEarly      = !isNormal && svcAtM >= 300;
+            normalRetAge = 55;
+            break;
+          default: // noncontributory
+            // Normal: 62/10 yos OR 55/30 yos.  Early: 55/20 yos.
+            isNormal     = (ageAtM >= 62 && svcAtM >= 120) || (ageAtM >= 55 && svcAtM >= 360);
+            isEarly      = !isNormal && ageAtM >= 55 && svcAtM >= 240;
+            normalRetAge = svcAtM >= 360 ? 55 : 62;
+        }
 
         let pension = null;
         if (isNormal || isEarly) {
-          // normalRetAge is 55 once the 55/30 threshold is met, otherwise 62.
-          const normalRetAge = (svcAtM >= 360 && ageAtM >= 55) ? 55 : 62;
-          const yearsEarly   = Math.max(0, normalRetAge - Math.floor(ageAtM));
-          const factor       = Math.max(0, 1 - 0.06 * yearsEarly);
+          const yearsEarly = Math.max(0, normalRetAge - Math.floor(ageAtM));
+          const factor     = Math.max(0, 1 - 0.06 * yearsEarly);
           pension = config.multiplier * (svcAtM / 12) * afcMonthly * factor;
         }
 
@@ -1107,7 +1134,7 @@
       document.getElementById(id).addEventListener('input', updateCalcBtn)
     );
 
-    document.getElementById('calc-btn').addEventListener('click', () => {
+    function runCalculate() {
       const plan       = document.getElementById('plan').value;
       const svcYears   = parseInt(document.getElementById('svc-years').value)  || 0;
       const svcMonths  = parseInt(document.getElementById('svc-months').value) || 0;
@@ -1129,7 +1156,9 @@
       });
       renderSeriesTable(series);
       drawChart(series);
-    });
+    }
+
+    document.getElementById('calc-btn').addEventListener('click', runCalculate);
 
     document.getElementById('plan').addEventListener('input', () => {
       const planEl = document.getElementById('plan');
@@ -1215,6 +1244,8 @@
       syncAsOfVisibility();
       updateCalcBtn();
       updateReloadLink();
+      if (!document.getElementById('calc-btn').disabled)
+        requestAnimationFrame(runCalculate);
     }
     // ── Stage 4 verification ─────────────────────────────────────
     {
