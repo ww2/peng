@@ -265,18 +265,6 @@
   <!-- ── Chart ────────────────────────────────────────────────── -->
   <svg id="chart-svg"></svg>
 
-  <!-- ── Series table (Stage 5–6 debug) ──────────────────────── -->
-  <details id="series-details" style="margin-top:1rem; font-size:0.8rem;" hidden>
-    <summary style="cursor:pointer; color:#0066cc; user-select:none;">Series table</summary>
-    <div id="series-table-container" style="margin-top:0.4rem; max-height:400px; overflow:auto;"></div>
-  </details>
-
-  <!-- ── Stage 4 verification ─────────────────────────────────── -->
-  <details id="stage4-verify" style="margin-top:1rem; font-size:0.8rem;">
-    <summary style="cursor:pointer; color:#0066cc; user-select:none;">Stage 4 — utility function verification</summary>
-    <div id="stage4-verify-body" style="margin-top:0.4rem;"></div>
-  </details>
-
   <script type="module">
     import * as d3 from 'https://cdn.jsdelivr.net/npm/d3@7/+esm';
     import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs';
@@ -1061,54 +1049,6 @@
       return wrapper;
     }
 
-    // ── Series table rendering ───────────────────────────────────
-    const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    const STATUS_COLOR = { normal: 'green', early: '#884400', ineligible: '#999' };
-
-    function renderSeriesTable(rows) {
-      const table = document.createElement('table');
-      table.style.cssText = 'border-collapse:collapse; font-family:monospace; font-size:0.8rem; width:100%;';
-
-      const thead = table.createTHead().insertRow();
-      for (const h of ['Retirement date', 'Service (mo)', 'Age', 'Status', 'Pension/mo']) {
-        const th = document.createElement('th');
-        th.textContent = h;
-        th.style.cssText =
-          'text-align:left; padding:0.15rem 0.7rem; border-bottom:1px solid #ccc;' +
-          'position:sticky; top:0; background:#fff;';
-        thead.appendChild(th);
-      }
-
-      let prevStatus = null;
-      for (const { retDate, svcAtM, ageAtM, status, pension } of rows) {
-        const tr = table.insertRow();
-        if (prevStatus !== null && status !== prevStatus)
-          tr.style.borderTop = '2px solid #bbb';
-        prevStatus = status;
-
-        const cells = [
-          `${MONTH_NAMES[retDate.getMonth()]} ${retDate.getFullYear()}`,
-          String(svcAtM),
-          String(Math.floor(ageAtM)),
-          status,
-          pension !== null ? `$${fmtMoney(pension)}` : '',
-        ];
-        cells.forEach((text, i) => {
-          const td = tr.insertCell();
-          td.textContent = text;
-          td.style.cssText =
-            `padding:0.1rem 0.7rem;${i === 3 ? ` color:${STATUS_COLOR[status]};` : ''}`;
-        });
-      }
-
-      const container = document.getElementById('series-table-container');
-      container.innerHTML = '';
-      container.appendChild(table);
-      const details = document.getElementById('series-details');
-      details.hidden = false;
-      details.open   = true;
-    }
-
     // ── State ────────────────────────────────────────────────────
     // afcComputed is set by Stage 2 when extraction succeeds.
     // Exposed on window so later stages can set it and call updateCalcBtn().
@@ -1154,7 +1094,10 @@
         lastDayOfSvc,
         afcMonthly,
       });
-      renderSeriesTable(series);
+      const statusLine = document.getElementById('status-line');
+      const eligible   = series.filter(d => d.pension !== null);
+      statusLine.textContent = eligible.length === 0
+        ? 'No eligible retirement dates found.' : '';
       drawChart(series);
     }
 
@@ -1247,65 +1190,6 @@
       if (!document.getElementById('calc-btn').disabled)
         requestAnimationFrame(runCalculate);
     }
-    // ── Stage 4 verification ─────────────────────────────────────
-    {
-      const D = (y, mo, d) => new Date(y, mo - 1, d);
-      const cases = [
-        // monthsBetween
-        { fn: 'monthsBetween',  label: 'same day next month',       args: [D(2025,1,15), D(2025,2,15)],                           expected: 1          },
-        { fn: 'monthsBetween',  label: 'one day before boundary',   args: [D(2025,1,15), D(2025,2,14)],                           expected: 0          },
-        { fn: 'monthsBetween',  label: 'Jan 31 → Feb 28',           args: [D(2025,1,31), D(2025,2,28)],                           expected: 1          },
-        { fn: 'monthsBetween',  label: 'three months',              args: [D(2025,1,1),  D(2025,4,1)],                            expected: 3          },
-        { fn: 'monthsBetween',  label: 'full year',                 args: [D(2025,1,1),  D(2026,1,1)],                            expected: 12         },
-        { fn: 'monthsBetween',  label: 'same date',                 args: [D(2025,6,15), D(2025,6,15)],                           expected: 0          },
-        // fractionalAge
-        { fn: 'fractionalAge',  label: 'exact 60th birthday',       args: [D(1975,6,15), D(2035,6,15)],                           expected: 60         },
-        { fn: 'fractionalAge',  label: '60 years 3 months',         args: [D(1975,6,15), D(2035,9,15)],                           expected: 60.25      },
-        { fn: 'fractionalAge',  label: 'one day before 60th bday',  args: [D(1975,6,15), D(2035,6,14)],                           expected: 59 + 11/12 },
-        // serviceAtMonth
-        { fn: 'serviceAtMonth', label: 'active, 3 months accrue',   args: [120, D(2025,1,1), D(2025,4,1), null],                  expected: 123        },
-        { fn: 'serviceAtMonth', label: 'lastDay caps at Feb',        args: [120, D(2025,1,1), D(2025,4,1), D(2025,2,1)],          expected: 121        },
-        { fn: 'serviceAtMonth', label: 'ret before lastDay, 0 gain', args: [120, D(2025,1,1), D(2025,1,15), D(2025,2,1)],         expected: 120        },
-        { fn: 'serviceAtMonth', label: 'asOf = lastDay, static',     args: [150, D(2025,6,30), D(2025,12,1), D(2025,6,30)],       expected: 150        },
-      ];
-
-      const fns = { monthsBetween, fractionalAge, serviceAtMonth };
-      const fmt = v => Number.isInteger(v) ? String(v) : v.toFixed(6).replace(/0+$/, '');
-
-      const table = document.createElement('table');
-      table.style.cssText = 'border-collapse:collapse; font-family:monospace; font-size:0.8rem;';
-
-      const thead = table.createTHead().insertRow();
-      for (const h of ['function', 'description', 'expected', 'actual', '']) {
-        const th = document.createElement('th');
-        th.textContent = h;
-        th.style.cssText = 'text-align:left; padding:0.15rem 0.7rem; border-bottom:1px solid #ccc;';
-        thead.appendChild(th);
-      }
-
-      let prevFn = '';
-      for (const c of cases) {
-        const actual = fns[c.fn](...c.args);
-        const pass   = Math.abs(actual - c.expected) < 1e-9;
-        const row    = table.insertRow();
-        const fnLabel = c.fn !== prevFn ? c.fn : '';
-        prevFn = c.fn;
-        for (const [val, extra] of [
-          [fnLabel,          'color:#555'],
-          [c.label,          ''],
-          [fmt(c.expected),  ''],
-          [fmt(actual),      pass ? 'color:green' : 'color:red; font-weight:bold'],
-          [pass ? '✓' : '✗', pass ? 'color:green' : 'color:red; font-weight:bold'],
-        ]) {
-          const td = row.insertCell();
-          td.textContent = val;
-          td.style.cssText = `padding:0.15rem 0.7rem; ${extra}`;
-        }
-      }
-
-      document.getElementById('stage4-verify-body').appendChild(table);
-    }
-
     // ── Chart ────────────────────────────────────────────────────
     function drawChart(series = null) {
       const svg = d3.select('#chart-svg');

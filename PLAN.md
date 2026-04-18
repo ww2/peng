@@ -445,7 +445,7 @@ errors or "No eligible retirement dates found" when the series is empty
 - Debug table is gone; chart is the only output
 - Missing required fields show a clear error instead of a broken chart
 - "No eligible dates found" appears for implausible inputs (e.g., DOB = today)
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
