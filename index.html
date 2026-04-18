@@ -882,8 +882,8 @@
     }
 
     // ── AFC computation ──────────────────────────────────────────
-    function computeAndFillAfc() {
-      const config = PLAN_CONFIGS[planEl.value];
+    function computeAndFillAfc(planKey = planEl.value) {
+      const config = PLAN_CONFIGS[planKey];
       if (!config || !lastWindows.length) return null;
       const scored = lastWindows.map(w => ({
         ...w,
@@ -1172,7 +1172,7 @@
 
       prevPlanValue = newVal;
       earningsFieldset.disabled = !newVal;
-      const dpResult = computeAndFillAfc();
+      const dpResult = computeAndFillAfc(newVal);
       if (dpResult) {
         const existing = debugBody.querySelector('.windows-section');
         const section  = renderWindowsSection(dpResult.selected, dpResult.config);
