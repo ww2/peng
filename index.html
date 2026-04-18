@@ -1160,7 +1160,7 @@
     planEl.addEventListener('input', () => {
       const newVal = planEl.value;
 
-      if (manualAfcEl.value.trim() && newVal) {
+      if (manualAfcEl.value.trim() && newVal && lastWindows.length) {
         if (!confirm('Changing the plan will recompute your Monthly AFC. Continue?')) {
           planEl.value = prevPlanValue;
           earningsFieldset.disabled = !prevPlanValue;
