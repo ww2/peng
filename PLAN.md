@@ -352,7 +352,7 @@ one of "as of" or "last day of service" is provided before Calculate enables.
 - `lastDay` blank, `asOf` set: Calculate enables; service accrues forward from
   `asOf` date on each candidate month
 - Both blank: Calculate stays disabled despite plan + DOB + AFC being filled
-**Status**: Not Started
+**Status**: Complete
 
 ---
 

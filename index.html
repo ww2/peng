@@ -189,14 +189,20 @@
         <input type="date" id="dob">
       </div>
 
-      <div class="field-pair">
-        <div class="field">
-          <label for="svc-years">Credited service — years</label>
-          <input type="number" id="svc-years" min="0" max="50" step="1" placeholder="0">
+      <div>
+        <div class="field-pair">
+          <div class="field">
+            <label for="svc-years">Credited service — years</label>
+            <input type="number" id="svc-years" min="0" max="50" step="1" placeholder="0">
+          </div>
+          <div class="field">
+            <label for="svc-months">months</label>
+            <input type="number" id="svc-months" min="0" max="11" step="1" placeholder="0">
+          </div>
         </div>
-        <div class="field">
-          <label for="svc-months">months</label>
-          <input type="number" id="svc-months" min="0" max="11" step="1" placeholder="0">
+        <div class="field" id="svc-as-of-field" style="margin-top:0.4rem;">
+          <label for="svc-as-of">Service credited as of</label>
+          <input type="date" id="svc-as-of">
         </div>
       </div>
 
@@ -233,6 +239,7 @@
           <div>
             <button id="picker-btn" type="button">Choose directory…</button>
             <input type="file" id="picker" webkitdirectory accept=".pdf" style="display:none">
+            <button id="cancel-btn" type="button" style="display:none">Cancel</button>
           </div>
         </div>
         <div id="afc-computed"></div>
@@ -280,12 +287,17 @@
     };
 
     // ── Directory picker ─────────────────────────────────────────
-    let pdfFiles     = {};
-    let lastStubs    = [];
-    let lastWindows  = [];
+    let pdfFiles        = {};
+    let lastStubs       = [];
+    let lastWindows     = [];
+    let cancelRequested = false;
 
     document.getElementById('picker-btn').addEventListener('click', () => {
       document.getElementById('picker').click();
+    });
+
+    document.getElementById('cancel-btn').addEventListener('click', () => {
+      cancelRequested = true;
     });
 
     // Some browsers restore file input selections across reloads; clear on load.
@@ -304,18 +316,30 @@
       const dirName = pdfs[0]?.webkitRelativePath.split('/')[0] ?? '';
       document.getElementById('picker-path').textContent = dirName ? `  …/${dirName}` : '';
 
+      // Clear any previously computed AFC immediately.
+      document.getElementById('manual-afc').value = '';
+      updateCalcBtn();
+
       const afcComputedEl = document.getElementById('afc-computed');
       const debugBody     = document.getElementById('debug-body');
+      const cancelBtn     = document.getElementById('cancel-btn');
+      const pickerBtn     = document.getElementById('picker-btn');
 
       const debugDetails = document.getElementById('debug-details');
       debugDetails.open = false;
       debugDetails.classList.add('disabled');
       afcComputedEl.textContent = 'Extracting…';
+      document.getElementById('afc-date-range').textContent = '';
       debugBody.innerHTML = '';
+
+      cancelRequested = false;
+      cancelBtn.style.display = '';
+      pickerBtn.disabled = true;
 
       const results = [];
       const errors  = [];
       for (let i = 0; i < pdfs.length; i++) {
+        if (cancelRequested) break;
         afcComputedEl.textContent = `Extracting… ${i + 1} / ${pdfs.length}`;
         try {
           const result = await extractPaystub(pdfs[i]);
@@ -324,6 +348,18 @@
         } catch (err) {
           errors.push({ file: pdfs[i].webkitRelativePath, error: err.message });
         }
+      }
+
+      cancelBtn.style.display = 'none';
+      pickerBtn.disabled = false;
+
+      if (cancelRequested) {
+        afcComputedEl.textContent = '';
+        lastStubs   = [];
+        lastWindows = [];
+        pdfFiles    = {};
+        updateCalcBtn();
+        return;
       }
 
       results.sort((a, b) => (a.documentNumber ?? '').localeCompare(b.documentNumber ?? ''));
@@ -956,14 +992,16 @@
     function updateCalcBtn() {
       const group1Ok = !!(
         document.getElementById('plan').value &&
-        document.getElementById('dob').value
+        document.getElementById('dob').value &&
+        (document.getElementById('last-day').value ||
+         document.getElementById('svc-as-of').value)
       );
       const manualAfc = parseFloat(document.getElementById('manual-afc').value);
       const group2Ok = (window.afcComputed !== null) || (manualAfc > 0);
       document.getElementById('calc-btn').disabled = !(group1Ok && group2Ok);
     }
 
-    ['dob', 'svc-years', 'svc-months', 'manual-afc'].forEach(id =>
+    ['dob', 'svc-years', 'svc-months', 'manual-afc', 'svc-as-of', 'last-day'].forEach(id =>
       document.getElementById(id).addEventListener('input', updateCalcBtn)
     );
 
@@ -990,9 +1028,20 @@
       updateReloadLink();
     });
 
+    // ── "As of" visibility: shown when lastDay blank, hidden when filled ─
+    function syncAsOfVisibility() {
+      document.getElementById('svc-as-of-field').hidden =
+        !!document.getElementById('last-day').value;
+    }
+
+    document.getElementById('last-day').addEventListener('input', syncAsOfVisibility);
+
     // ── Last-day-of-service clear button ─────────────────────────
     document.getElementById('last-day-clear').addEventListener('click', () => {
       document.getElementById('last-day').value = '';
+      syncAsOfVisibility();
+      updateCalcBtn();
+      updateReloadLink();
     });
 
     // ── Reload link ──────────────────────────────────────────────
@@ -1006,6 +1055,7 @@
       add('dob',       'dob');
       add('svcYears',  'svc-years');
       add('svcMonths', 'svc-months');
+      add('svcAsOf',   'svc-as-of');
       add('lastDay',   'last-day');
       add('afc',       'manual-afc');
       const qs = params.toString();
@@ -1016,11 +1066,9 @@
       document.getElementById('reload-link').href = buildReloadUrl();
     }
 
-    ['dob', 'svc-years', 'svc-months', 'last-day', 'manual-afc'].forEach(id =>
+    ['dob', 'svc-years', 'svc-months', 'svc-as-of', 'last-day', 'manual-afc'].forEach(id =>
       document.getElementById(id).addEventListener('input', updateReloadLink)
     );
-    // last-day can also be cleared via the ✕ button
-    document.getElementById('last-day-clear').addEventListener('click', updateReloadLink);
 
     // ── URL parameter pre-fill ────────────────────────────────────
     // Supported params: plan, dob, svcYears, svcMonths, lastDay, afc
@@ -1032,11 +1080,13 @@
       set('dob',        'dob');
       set('svc-years',  'svcYears');
       set('svc-months', 'svcMonths');
+      set('svc-as-of',  'svcAsOf');
       set('last-day',   'lastDay');
       set('manual-afc', 'afc');
       prevPlanValue = document.getElementById('plan').value;
       document.getElementById('group-earnings-input').disabled =
         !document.getElementById('plan').value;
+      syncAsOfVisibility();
       updateCalcBtn();
       updateReloadLink();
     }
