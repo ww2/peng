@@ -2,10 +2,8 @@
 
 ## AFC details
 
-In the paystub details panel, please show which N 12-month windows were selected
-(as start-date - end-date), and what each of them had as its average monthly
-compensation (my current monthly AFC seems high, compared to my current salary,
-and I want to look more closely at those data)
+For that matter, is there a good place to show me something like the monthly
+compensation based on my most recent paystub's regular earnings?
 
 ## Paystub handling
 

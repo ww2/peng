@@ -449,7 +449,8 @@
       lastWindows = windows;
 
       debugDetails.classList.remove('disabled');
-      computeAndFillAfc();
+      const dpResult = computeAndFillAfc();
+      if (dpResult) debugBody.appendChild(renderWindowsSection(dpResult.selected, dpResult.config));
       updateReloadLink();
       maybeCalculate();
     });
@@ -883,14 +884,28 @@
     // ── AFC computation ──────────────────────────────────────────
     function computeAndFillAfc() {
       const config = PLAN_CONFIGS[planEl.value];
-      if (!config || !lastWindows.length) return;
+      if (!config || !lastWindows.length) return null;
       const scored = lastWindows.map(w => ({
         ...w,
         score: w.stubs.reduce((sum, s) => sum + scoreStub(s, config.mode), 0),
       }));
       const result = solveDP(scored, config.N);
-      if (!result) return;
+      if (!result) return null;
       manualAfcEl.value = (result.total / config.N / 12).toFixed(2);
+      return { selected: result.selected, config };
+    }
+
+    function renderWindowsSection(selected, config) {
+      const lines = [
+        `Best ${config.N} window${config.N !== 1 ? 's' : ''} (${config.mode} pay):`,
+        ...selected.map(w =>
+          `  ${fmtDate(w.start)} – ${fmtDate(w.endIncl)}   $${fmtMoney(w.score / 12)}/mo avg`
+        ),
+      ];
+      const pre = document.createElement('pre');
+      pre.className   = 'filter-summary windows-section';
+      pre.textContent = lines.join('\n');
+      return pre;
     }
 
     // ── Display helpers ──────────────────────────────────────────
@@ -1157,7 +1172,13 @@
 
       prevPlanValue = newVal;
       earningsFieldset.disabled = !newVal;
-      computeAndFillAfc();
+      const dpResult = computeAndFillAfc();
+      if (dpResult) {
+        const existing = debugBody.querySelector('.windows-section');
+        const section  = renderWindowsSection(dpResult.selected, dpResult.config);
+        if (existing) existing.replaceWith(section);
+        else if (debugBody.children.length) debugBody.appendChild(section);
+      }
       updateReloadLink();
       maybeCalculate();
     });
