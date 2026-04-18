@@ -25,6 +25,8 @@
       margin-bottom: 1rem;
     }
 
+    fieldset[disabled] { opacity: 0.5; pointer-events: none; }
+
     legend {
       font-size: 0.8rem;
       color: #555;
@@ -165,44 +167,6 @@
   <h1>ERS Pension Graph</h1>
   <p id="reload-bar"><a id="reload-link" href="#">Reload</a></p>
 
-  <!-- ── Group 2: Earnings data ───────────────────────────────── -->
-  <fieldset id="group-earnings-input">
-    <legend>Earnings data</legend>
-
-    <!-- Option B: manual AFC -->
-    <div id="group-earnings-input-manual">
-      <div class="field">
-        <label for="manual-afc">Monthly AFC ($)</label>
-        <input type="text" inputmode="decimal" id="manual-afc" placeholder="e.g. 4413.00">
-      </div>
-    </div>
-
-    <div class="or-divider">or</div>
-
-    <!-- Option A: paystub directory -->
-    <div id="group-earnings-input-picker">
-      <div id="picker-controls">
-        <div class="field">
-          <label for="picker-btn">Paystub directory<span id="picker-path"></span></label>
-          <div>
-            <button id="picker-btn" type="button">Choose directory…</button>
-            <input type="file" id="picker" webkitdirectory accept=".pdf" style="display:none">
-          </div>
-        </div>
-        <div id="afc-computed"></div>
-        <div id="afc-date-range"></div>
-      </div>
-      <div class="col-divider"></div>
-      <details id="debug-details" class="disabled">
-        <summary>Show paystub detail / Export JSON</summary>
-        <div class="details-body" id="debug-body">
-          <!-- populated in Stage 2 -->
-        </div>
-      </details>
-    </div>
-
-  </fieldset>
-
   <!-- ── Group 1: Your information ───────────────────────────── -->
   <fieldset id="group-plan-input">
     <legend>Your information</legend>
@@ -245,6 +209,44 @@
       </div>
 
     </div>
+  </fieldset>
+
+  <!-- ── Group 2: Earnings data ───────────────────────────────── -->
+  <fieldset id="group-earnings-input" disabled>
+    <legend>Earnings data</legend>
+
+    <!-- Option B: manual AFC -->
+    <div id="group-earnings-input-manual">
+      <div class="field">
+        <label for="manual-afc">Monthly AFC ($)</label>
+        <input type="text" inputmode="decimal" id="manual-afc" placeholder="e.g. 4413.00">
+      </div>
+    </div>
+
+    <div class="or-divider">or</div>
+
+    <!-- Option A: paystub directory -->
+    <div id="group-earnings-input-picker">
+      <div id="picker-controls">
+        <div class="field">
+          <label for="picker-btn">Paystub directory<span id="picker-path"></span></label>
+          <div>
+            <button id="picker-btn" type="button">Choose directory…</button>
+            <input type="file" id="picker" webkitdirectory accept=".pdf" style="display:none">
+          </div>
+        </div>
+        <div id="afc-computed"></div>
+        <div id="afc-date-range"></div>
+      </div>
+      <div class="col-divider"></div>
+      <details id="debug-details" class="disabled">
+        <summary>Show paystub detail / Export JSON</summary>
+        <div class="details-body" id="debug-body">
+          <!-- populated in Stage 2 -->
+        </div>
+      </details>
+    </div>
+
   </fieldset>
 
   <!-- ── Calculate ────────────────────────────────────────────── -->
@@ -916,6 +918,9 @@
     // Exposed on window so later stages can set it and call updateCalcBtn().
     window.afcComputed = null;
 
+    // Tracks the last committed plan value so we can revert on cancel.
+    let prevPlanValue = '';
+
     // ── Calculate button enable logic ────────────────────────────
     function updateCalcBtn() {
       const group1Ok = !!(
@@ -927,10 +932,32 @@
       document.getElementById('calc-btn').disabled = !(group1Ok && group2Ok);
     }
 
-    ['plan', 'dob', 'svc-years', 'svc-months', 'manual-afc'].forEach(id =>
+    ['dob', 'svc-years', 'svc-months', 'manual-afc'].forEach(id =>
       document.getElementById(id).addEventListener('input', updateCalcBtn)
     );
-    document.getElementById('plan').addEventListener('input', computeAndFillAfc);
+
+    document.getElementById('plan').addEventListener('input', () => {
+      const planEl = document.getElementById('plan');
+      const newVal = planEl.value;
+      const afcEl  = document.getElementById('manual-afc');
+      const earningsFieldset = document.getElementById('group-earnings-input');
+
+      if (afcEl.value.trim() && newVal) {
+        if (!confirm('Changing the plan will recompute your Monthly AFC. Continue?')) {
+          planEl.value = prevPlanValue;
+          earningsFieldset.disabled = !prevPlanValue;
+          updateCalcBtn();
+          updateReloadLink();
+          return;
+        }
+      }
+
+      prevPlanValue = newVal;
+      earningsFieldset.disabled = !newVal;
+      computeAndFillAfc();
+      updateCalcBtn();
+      updateReloadLink();
+    });
 
     // ── Last-day-of-service clear button ─────────────────────────
     document.getElementById('last-day-clear').addEventListener('click', () => {
@@ -958,7 +985,7 @@
       document.getElementById('reload-link').href = buildReloadUrl();
     }
 
-    ['plan', 'dob', 'svc-years', 'svc-months', 'last-day', 'manual-afc'].forEach(id =>
+    ['dob', 'svc-years', 'svc-months', 'last-day', 'manual-afc'].forEach(id =>
       document.getElementById(id).addEventListener('input', updateReloadLink)
     );
     // last-day can also be cleared via the ✕ button
@@ -976,6 +1003,9 @@
       set('svc-months', 'svcMonths');
       set('last-day',   'lastDay');
       set('manual-afc', 'afc');
+      prevPlanValue = document.getElementById('plan').value;
+      document.getElementById('group-earnings-input').disabled =
+        !document.getElementById('plan').value;
       updateCalcBtn();
       updateReloadLink();
     }

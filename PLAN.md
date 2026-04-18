@@ -306,7 +306,7 @@ plan-change prompt + revert-on-cancel.
   the previous plan in the dropdown
 - Changing plan with empty AFC field rewrites silently
 - Calculate button remains disabled until DOB is entered and AFC field has a value
-**Status**: In Progress
+**Status**: Complete
 
 ---
 
