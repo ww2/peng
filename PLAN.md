@@ -370,34 +370,21 @@ retirement date | service months | whole age | status (normal/early/ineligible) 
 
 ---
 
-### Stage 6: Pension series for all plan variants (table output)
-**Goal**: Extend `calculateSeries` to cover all five plan variants; table
-updates when the plan dropdown changes
-**Verify**:
-- `hybrid-post2012`: normal at 65/10 yos or 60/30 yos; early at 55/20 yos
-- `hybrid-pre2012`: normal at 62/5 yos or 55/30 yos; same early threshold
-- `contributory-post2012`: normal at 60/10 yos; early at 55/25 yos
-- `contributory-pre2012`: normal at 55/5 yos; early at *any age* w/25 yos
-  (confirm: rows below age 55 with 25+ yos show `early`, not `ineligible`)
-- Dual-threshold plans: confirm `normal` fires on whichever condition is met first
-**Status**: Not Started
-
----
-
-### Stage 7: D3 axes (no data)
+### Stage 6: D3 axes (no data)
 **Goal**: Replace the chart placeholder with a real SVG; render X and Y axes
 with correct tick structure but hardcoded ranges (X: $0–$5,000; Y: today to
 today+15 years)
 **Verify**: Both axes visible; X major ticks every $1,000 labeled, minor every
 $100 unlabeled; Y major ticks on Jan 1 each year labeled, minor on 1st of every
 other month; earlier dates at the bottom; no data yet
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
-### Stage 8a: Pension curve (hardcoded ranges)
-**Goal**: Feed `calculateSeries` output into the chart as a `d3.line()` over the
-hardcoded axes from Stage 7; use `line.defined(d => d.pension !== null)` for gaps
+### Stage 7: Pension curve (hardcoded ranges)
+**Goal**: Feed `calculateSeries` output (noncontributory) into the chart as a
+`d3.line()` over the hardcoded axes from Stage 6; use
+`line.defined(d => d.pension !== null)` for gaps
 **Verify**: Line visible over existing axes; staircase steps clearly visible in
 early retirement window; line resumes after each step; line absent (gap) for
 ineligible months; service-driven upward slope visible for active employees
@@ -405,7 +392,7 @@ ineligible months; service-driven upward slope visible for active employees
 
 ---
 
-### Stage 8b: Dynamic axis ranges
+### Stage 8: Dynamic axis ranges
 **Goal**: Replace hardcoded axis ranges with data-driven ones — X max rounded up
 to nearest $1,000; Y from first candidate month to 10 years past earliest normal
 retirement date
@@ -424,10 +411,25 @@ the curve begins; label readable; curve renders on top of shading
 
 ---
 
-### Stage 10a: Full form wiring + Calculate button
+### Stage 10: Pension series + chart for all plan variants
+**Goal**: Extend `calculateSeries` to cover all five plan variants; chart and
+debug table both update when the plan dropdown changes and Calculate is clicked
+**Verify**:
+- `hybrid-post2012`: normal at 65/10 yos or 60/30 yos; early at 55/20 yos
+- `hybrid-pre2012`: normal at 62/5 yos or 55/30 yos; same early threshold
+- `contributory-post2012`: normal at 60/10 yos; early at 55/25 yos
+- `contributory-pre2012`: normal at 55/5 yos; early at *any age* w/25 yos
+  (confirm: rows below age 55 with 25+ yos show `early`, not `ineligible`)
+- Dual-threshold plans: confirm `normal` fires on whichever condition is met first
+- Chart curve and staircase shape correct for each plan variant
+**Status**: Not Started
+
+---
+
+### Stage 11: Full form wiring + Calculate button
 **Goal**: Wire all form inputs (plan variant, DOB, service years/months, last
 day of service) to `calculateSeries`; Calculate button renders the chart; debug
-series table from Stages 5–6 remains visible for cross-checking
+series table from Stages 5 & 10 remains visible for cross-checking
 **Verify**:
 - Changing any input and clicking Calculate updates the chart
 - Blank "last day of service" → active-employee accrual; filled date → service caps
@@ -435,7 +437,7 @@ series table from Stages 5–6 remains visible for cross-checking
 
 ---
 
-### Stage 10b: Remove debug table + status line
+### Stage 12: Remove debug table + status line
 **Goal**: Remove the debug series table; add a status line showing validation
 errors or "No eligible retirement dates found" when the series is empty
 **Verify**:
@@ -446,7 +448,7 @@ errors or "No eligible retirement dates found" when the series is empty
 
 ---
 
-### Stage 11: Hover tooltip
+### Stage 13: Hover tooltip
 **Goal**: On mouse move over the chart, draw vertical + horizontal crosshair
 lines snapped to the nearest data point and show a label ("May 2031 — $2,847/mo")
 **Verify**: Tooltip appears on hover; snaps correctly to data points; disappears

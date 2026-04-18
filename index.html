@@ -1273,6 +1273,119 @@
 
       document.getElementById('stage4-verify-body').appendChild(table);
     }
+
+    // ── Chart ────────────────────────────────────────────────────
+    function drawChart() {
+      const svg = d3.select('#chart-svg');
+      const W   = svg.node().clientWidth;
+      const H   = svg.node().clientHeight;
+
+      const margin = { top: 24, right: 20, bottom: 52, left: 62 };
+      const iW = W - margin.left - margin.right;
+      const iH = H - margin.top  - margin.bottom;
+
+      svg.selectAll('*').remove();
+
+      const g = svg.append('g')
+        .attr('transform', `translate(${margin.left},${margin.top})`);
+
+      // ── Scales (hardcoded for Stage 6) ─────────────────────────
+      const xScale = d3.scaleLinear().domain([0, 5000]).range([0, iW]);
+
+      const today = new Date();
+      const yMin  = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+      const yMax  = new Date(today.getFullYear() + 15, today.getMonth() + 1, 1);
+      const yScale = d3.scaleTime().domain([yMin, yMax]).range([iH, 0]);
+
+      // ── Tick values ─────────────────────────────────────────────
+      const xMajorVals = d3.range(0, 5001, 1000);
+      const xMinorVals = d3.range(0, 5001, 100).filter(v => v % 1000 !== 0);
+
+      const yMajorVals = [], yMinorVals = [];
+      for (let yr = yMin.getFullYear(); yr <= yMax.getFullYear() + 1; yr++) {
+        const jan1 = new Date(yr, 0, 1);
+        if (jan1 >= yMin && jan1 <= yMax) yMajorVals.push(jan1);
+        for (const mo of [2, 4, 6, 8, 10]) {   // Mar, May, Jul, Sep, Nov
+          const d = new Date(yr, mo, 1);
+          if (d >= yMin && d <= yMax) yMinorVals.push(d);
+        }
+      }
+
+      // ── X axis ─────────────────────────────────────────────────
+      g.append('g').selectAll('line').data(xMajorVals).join('line')
+        .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
+        .attr('y1', 0).attr('y2', iH)
+        .attr('stroke', '#e0e0e0').attr('stroke-width', 1);
+
+      g.append('g').selectAll('line').data(xMajorVals).join('line')
+        .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
+        .attr('y1', iH).attr('y2', iH + 6)
+        .attr('stroke', '#555').attr('stroke-width', 1);
+
+      g.append('g').selectAll('text').data(xMajorVals).join('text')
+        .attr('x', d => xScale(d)).attr('y', iH + 18)
+        .attr('text-anchor', 'middle')
+        .attr('font-family', 'monospace').attr('font-size', '0.75rem').attr('fill', '#333')
+        .text(d => d === 0 ? '$0' : `$${d / 1000}k`);
+
+      g.append('g').selectAll('line').data(xMinorVals).join('line')
+        .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
+        .attr('y1', iH).attr('y2', iH + 3)
+        .attr('stroke', '#bbb').attr('stroke-width', 0.5);
+
+      // ── Y axis ─────────────────────────────────────────────────
+      g.append('g').selectAll('line').data(yMajorVals).join('line')
+        .attr('x1', 0).attr('x2', iW)
+        .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
+        .attr('stroke', '#e0e0e0').attr('stroke-width', 1);
+
+      g.append('g').selectAll('line').data(yMajorVals).join('line')
+        .attr('x1', -6).attr('x2', 0)
+        .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
+        .attr('stroke', '#555').attr('stroke-width', 1);
+
+      g.append('g').selectAll('text').data(yMajorVals).join('text')
+        .attr('x', -10).attr('y', d => yScale(d))
+        .attr('dy', '0.32em').attr('text-anchor', 'end')
+        .attr('font-family', 'monospace').attr('font-size', '0.75rem').attr('fill', '#333')
+        .text(d => d.getFullYear());
+
+      g.append('g').selectAll('line').data(yMinorVals).join('line')
+        .attr('x1', -3).attr('x2', 0)
+        .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
+        .attr('stroke', '#bbb').attr('stroke-width', 0.5);
+
+      // ── Axis baselines ──────────────────────────────────────────
+      g.append('line')
+        .attr('x1', 0).attr('x2', iW).attr('y1', iH).attr('y2', iH)
+        .attr('stroke', '#555').attr('stroke-width', 1);
+      g.append('line')
+        .attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', iH)
+        .attr('stroke', '#555').attr('stroke-width', 1);
+
+      // ── Axis labels ─────────────────────────────────────────────
+      g.append('text')
+        .attr('x', iW / 2).attr('y', iH + 42)
+        .attr('text-anchor', 'middle')
+        .attr('font-family', 'monospace').attr('font-size', '0.8rem').attr('fill', '#333')
+        .text('Monthly Pension — Maximum Allowance ($/month)');
+
+      g.append('text')
+        .attr('transform', `translate(${-(margin.left - 14)},${iH / 2}) rotate(-90)`)
+        .attr('text-anchor', 'middle')
+        .attr('font-family', 'monospace').attr('font-size', '0.8rem').attr('fill', '#333')
+        .text('Retirement Date');
+
+      // ── Chart title ─────────────────────────────────────────────
+      svg.append('text')
+        .attr('x', margin.left + iW / 2).attr('y', 16)
+        .attr('text-anchor', 'middle')
+        .attr('font-family', 'monospace').attr('font-size', '0.85rem').attr('font-weight', 'bold')
+        .attr('fill', '#222')
+        .text('ERS Monthly Pension vs. Retirement Date');
+    }
+
+    drawChart();
   </script>
 </body>
 </html>
