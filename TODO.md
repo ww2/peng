@@ -1,21 +1,5 @@
 # ERS Pension Graph — Deferred Work
 
-## Post-retirement cost-of-living increases
-
-Each plan has an annual COLA applied after retirement:
-
-| Plan | COLA |
-|---|---|
-| hybrid-post2012 | 1.5 %/yr |
-| hybrid-pre2012 | 2.5 %/yr |
-| contributory-post2012 | 1.5 %/yr |
-| contributory-pre2012 | 2.5 %/yr |
-| noncontributory | 2.5 %/yr |
-
-These rates are known but not currently displayed anywhere. A natural place would
-be a secondary annotation on the chart or a note beneath it showing the projected
-value at a chosen future year.
-
 ## Multiple curves / overlays — sick leave projection
 
 Sick leave accrued at retirement converts to additional service credit under ERS
@@ -39,6 +23,13 @@ main curve):
 
 The existing (no sick leave) curve should remain visible as a baseline, giving
 the user three lines total: base, current sick leave, and projected sick leave.
+
+## Annual pay increases
+
+For Unit 8 positions like mine, and likely for all similar positions, there's an
+annual mandated raise which is supposed to relate to COLA.  Would it be better to
+derive that from the changes in regular pay in the paystubs, or add an optional
+form field to let the user enter that?
 
 ## Mixed service
 

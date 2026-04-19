@@ -130,6 +130,18 @@
     #status-line { font-size: 0.85rem; color: #c00; }
     #status-line:empty { display: none; }
 
+    /* ── Chart legend ── */
+    #chart-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1.5rem;
+      font-size: 0.8rem;
+      margin-bottom: 0.4rem;
+      align-items: center;
+    }
+    .legend-item { display: flex; align-items: center; gap: 0.4rem; }
+    .legend-item svg { flex-shrink: 0; }
+
     /* ── Chart ── */
     #chart-svg {
       display: block;
@@ -265,6 +277,26 @@
     <span id="status-line"></span>
   </div>
 
+  <!-- ── Chart legend ─────────────────────────────────────────── -->
+  <div id="chart-legend">
+    <span class="legend-item">
+      <svg width="24" height="10"><rect width="24" height="10" fill="#e8e8e8"/></svg>
+      Not yet vested
+    </span>
+    <span class="legend-item">
+      <svg width="24" height="10"><rect width="24" height="10" fill="#f5f5f5" stroke="#ccc" stroke-width="0.5"/></svg>
+      Vested, not yet eligible
+    </span>
+    <span class="legend-item">
+      <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#0066cc" stroke-width="1.5"/></svg>
+      Pension at retirement
+    </span>
+    <span class="legend-item">
+      <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#cc6600" stroke-width="1.5" stroke-dasharray="4,3"/></svg>
+      COLA projection (on hover)
+    </span>
+  </div>
+
   <!-- ── Chart ────────────────────────────────────────────────── -->
   <svg id="chart-svg"></svg>
 
@@ -285,6 +317,7 @@
       colorLabel     : '#333',
       colorMinor     : '#bbb',
       colorLine      : '#0066cc',
+      colorCola      : '#cc6600',
       colorTitle     : '#222',
       colorCrosshair : '#aaa',
     };
@@ -317,11 +350,11 @@
 
     // ── Plan configs ─────────────────────────────────────────────
     const PLAN_CONFIGS = {
-      'hybrid-post2012':       { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120 },
-      'hybrid-pre2012':        { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60 },
-      'contributory-post2012': { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120 },
-      'contributory-pre2012':  { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60 },
-      'noncontributory':       { multiplier: 0.0125, N: 3, mode: 'total',   vestingMonths: 120 },
+      'hybrid-post2012':       { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120, colaRate: 0.015 },
+      'hybrid-pre2012':        { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025 },
+      'contributory-post2012': { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120, colaRate: 0.015 },
+      'contributory-pre2012':  { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025 },
+      'noncontributory':       { multiplier: 0.0125, N: 3, mode: 'total',   vestingMonths: 120, colaRate: 0.025 },
     };
 
     // ── Directory picker ─────────────────────────────────────────
@@ -1482,7 +1515,9 @@
 
       // ── Tooltip ──────────────────────────────────────────────────
       if (eligible.length) {
-        const bisect  = d3.bisector(d => d.retDate).left;
+        const bisect   = d3.bisector(d => d.retDate).left;
+        const colaRate = PLAN_CONFIGS[planEl.value]?.colaRate ?? 0;
+        const colaLine = d3.line().x(p => p.x).y(p => p.y);
 
         const tip = g.append('g').attr('display', 'none');
 
@@ -1496,6 +1531,13 @@
 
         tip.append('circle').attr('class', 'tip-dot')
           .attr('r', 3.5).attr('fill', CHART.colorLine);
+
+        const colaPath = tip.append('g').attr('clip-path', 'url(#plot-clip)')
+          .append('path')
+          .attr('fill', 'none')
+          .attr('stroke', CHART.colorCola)
+          .attr('stroke-width', 1.5)
+          .attr('stroke-dasharray', '4,3');
 
         const tipLabel = tip.append('g');
         const tipRect  = tipLabel.append('rect')
@@ -1525,6 +1567,17 @@
             tip.select('.tip-v').attr('x1', px).attr('x2', px);
             tip.select('.tip-h').attr('y1', py).attr('y2', py);
             tip.select('.tip-dot').attr('cx', px).attr('cy', py);
+
+            // COLA projection — fixed 20-year horizon from hovered retirement date
+            const colaPoints = [];
+            for (let m = 0; m <= 240; m++) {
+              const d = addMonths(pt.retDate, m);
+              colaPoints.push({
+                x: xScale(d),
+                y: yScale(pt.pension * Math.pow(1 + colaRate, m / 12)),
+              });
+            }
+            colaPath.attr('d', colaLine(colaPoints));
 
             const pension = Math.round(pt.pension).toString()
               .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
