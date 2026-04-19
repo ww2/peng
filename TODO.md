@@ -1,9 +1,5 @@
 # ERS Pension Graph — Deferred Work
 
-## Paystub display
-
-I'd like to move the control that expands the list of scanned PDFs to be centered in its own full-width panel at the bottom of the 'Earnings data' group; and keep that panel hidden until the scan completes.
-
 ## Paystub handling
 
 Decide how to handle gaps in the paystubs being processed, then do so:

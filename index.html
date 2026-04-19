@@ -63,14 +63,12 @@
     #group-earnings-input-manual .field { flex-direction: row; align-items: center; }
     #manual-afc { width: 9ch; }
 
-    /* ── Picker two-column layout ── */
-    #group-earnings-input-picker {
-      display: grid;
-      grid-template-columns: 1fr 1px 1fr;
-      gap: 0 1rem;
-      align-items: start;
+    /* ── Debug panel ── */
+    #debug-panel {
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid #ccc;
     }
-    .col-divider { background: #ccc; align-self: stretch; }
 
     /* ── Group 2 stacked layout ── */
     .or-divider {
@@ -143,8 +141,7 @@
     .toggle-rows { margin: 0.25rem 0; font-size: 0.8rem; cursor: pointer;
                    color: #0066cc; background: none; border: none; padding: 0;
                    text-decoration: underline; }
-    .debug-count { display: flex; justify-content: space-between; align-items: baseline;
-                   margin: 0.25rem 0; font-size: 0.8rem; }
+    .debug-count { margin: 0.25rem 0; font-size: 0.8rem; }
     .dump-out { background: #f0f0f0; border: 1px solid #bbb; padding: 0.5rem;
                 margin: 0; overflow: auto; max-height: 300px;
                 font-size: 0.75rem; white-space: pre; }
@@ -244,7 +241,9 @@
         <div id="afc-date-range"></div>
         <div id="regular-earnings"></div>
       </div>
-      <div class="col-divider"></div>
+    </div>
+
+    <div id="debug-panel" hidden>
       <details id="debug-details" class="disabled">
         <summary>Show paystub detail / Export JSON</summary>
         <div class="details-body" id="debug-body">
@@ -306,6 +305,7 @@
     const regularEarningsEl = document.getElementById('regular-earnings');
     const debugDetails     = document.getElementById('debug-details');
     const debugBody        = document.getElementById('debug-body');
+    const debugPanelEl     = document.getElementById('debug-panel');
     const lastDayClearBtn  = document.getElementById('last-day-clear');
 
     // ── Plan configs ─────────────────────────────────────────────
@@ -350,6 +350,7 @@
 
       debugDetails.open = false;
       debugDetails.classList.add('disabled');
+      debugPanelEl.hidden = true;
       afcComputedEl.textContent     = 'Extracting…';
       afcDateRange.textContent      = '';
       regularEarningsEl.textContent = '';
@@ -393,28 +394,12 @@
       const windows = generateWindows(stubs);
       const json    = toJson(output);
 
-      // 1. Count line with toggle, expand-all, and download buttons
-      const countP       = document.createElement('div');
-      const toggleBtn    = document.createElement('button');
-      const expandAllBtn = document.createElement('button');
-      const dlBtn        = document.createElement('button');
-
-      toggleBtn.className      = 'toggle-rows';
-      toggleBtn.textContent    = 'list ▶';
-      expandAllBtn.id          = 'expand-all';
-      expandAllBtn.textContent = 'Expand all';
-      dlBtn.textContent        = 'Download JSON';
-
-      countP.className = 'debug-count';
-      const leftSpan  = document.createElement('span');
-      const rightSpan = document.createElement('span');
-      leftSpan.append(
-        `${pdfs.length} PDF${pdfs.length !== 1 ? 's' : ''} found (`,
-        toggleBtn, ')'
-      );
-      rightSpan.append(expandAllBtn, ' ', dlBtn);
-      countP.append(leftSpan, rightSpan);
-      debugBody.appendChild(countP);
+      // 1. Download JSON button — own line at top of debug body
+      const dlBtn = document.createElement('button');
+      dlBtn.textContent = 'Download JSON';
+      const dlDiv = document.createElement('div');
+      dlDiv.appendChild(dlBtn);
+      debugBody.appendChild(dlDiv);
 
       dlBtn.addEventListener('click', () => {
         const blob = new Blob([json], { type: 'application/json' });
@@ -424,7 +409,27 @@
         URL.revokeObjectURL(url);
       });
 
-      // 2. File list (hidden by default, toggled by show button)
+      // 2. Count line with toggle only
+      const countP   = document.createElement('div');
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className   = 'toggle-rows';
+      toggleBtn.textContent = 'list ▶';
+      countP.className      = 'debug-count';
+      countP.append(
+        `${pdfs.length} PDF${pdfs.length !== 1 ? 's' : ''} found (`,
+        toggleBtn, ')'
+      );
+      debugBody.appendChild(countP);
+
+      // 3. Expand all + file list — expand-all shown only when list is visible
+      const expandAllBtn = document.createElement('button');
+      expandAllBtn.id          = 'expand-all';
+      expandAllBtn.textContent = 'Expand all';
+      const expandAllRow = document.createElement('div');
+      expandAllRow.hidden = true;
+      expandAllRow.append('Click individual PDFs to see the extracted values, or ', expandAllBtn);
+      debugBody.appendChild(expandAllRow);
+
       const listEl  = document.createElement('ul');
       listEl.id     = 'files';
       listEl.hidden = true;
@@ -432,7 +437,8 @@
       debugBody.appendChild(listEl);
 
       toggleBtn.addEventListener('click', () => {
-        listEl.hidden = !listEl.hidden;
+        listEl.hidden      = !listEl.hidden;
+        expandAllRow.hidden = listEl.hidden;
         toggleBtn.textContent = listEl.hidden ? 'list ▶' : 'hide ▼';
       });
       expandAllBtn.addEventListener('click', () => expandAll(listEl));
@@ -460,6 +466,7 @@
       }
 
       debugDetails.classList.remove('disabled');
+      debugPanelEl.hidden = false;
       const dpResult = computeAndFillAfc();
       if (dpResult) debugBody.appendChild(renderWindowsSection(dpResult.selected, dpResult.config));
       updateReloadLink();
@@ -929,37 +936,6 @@
       }, 4).replace(/"§(.+?)§"/g, '$1');
     }
 
-    function formatFields(result, { sectionIdx, headerIdx, totalIdx }, warnings, rows) {
-      const dataRowCount = (headerIdx >= 0 && totalIdx > headerIdx)
-        ? totalIdx - headerIdx - 1 : '?';
-
-      const rowLabel = (idx, label) => {
-        const found = idx >= 0 ? `row ${idx}  →  ${rowToString(rows[idx].items)}` : '(not found)';
-        return `${label.padEnd(12)} ${found}`;
-      };
-
-      const earningsLines = Object.entries(result.currentEarnings)
-        .map(([k, v]) => {
-          const ytd = result.ytdEarnings[k];
-          return `  ${k.padEnd(32)} current: ${fmtMoney(v).padStart(10)}` +
-                 (ytd != null ? `   ytd: ${fmtMoney(ytd).padStart(10)}` : '');
-        });
-
-      return [
-        ...['payBeginDate','payEndDate','issueDate','documentType','documentNumber']
-          .map(k => `${k.padEnd(16)} ${result[k] ?? '(missing)'}`),
-        '',
-        rowLabel(sectionIdx, 'sectionIdx'),
-        rowLabel(headerIdx,  'headerIdx'),
-        rowLabel(totalIdx,   'totalIdx'),
-        `${'data rows'.padEnd(16)} ${dataRowCount}`,
-        '',
-        'currentEarnings:',
-        ...(earningsLines.length ? earningsLines : ['  (none)']),
-        ...(warnings.length ? ['', 'warnings:', ...warnings.map(w => `  ${w}`)] : []),
-      ].join('\n');
-    }
-
     async function populateOutput(file, output) {
       output.textContent = 'Loading…';
       output.hidden      = false;
@@ -967,16 +943,17 @@
       try {
         const result   = await extractPaystub(file);
         const rows     = result._rows;
-        const block    = result._block;
         const warnings = result._warnings;
         delete result._rows; delete result._block; delete result._warnings;
 
+        if (warnings.length) result.warnings = warnings;
+
         output.textContent = '';
 
-        const fieldsEl = document.createElement('pre');
-        fieldsEl.className   = 'fields-out';
-        fieldsEl.textContent = formatFields(result, block, warnings, rows);
-        output.appendChild(fieldsEl);
+        const jsonEl = document.createElement('pre');
+        jsonEl.className   = 'fields-out';
+        jsonEl.textContent = toJson(result);
+        output.appendChild(jsonEl);
 
         const toggleBtn = document.createElement('button');
         toggleBtn.className   = 'toggle-rows';
@@ -1153,6 +1130,7 @@
       // Debug panel
       debugDetails.open = false;
       debugDetails.classList.add('disabled');
+      debugPanelEl.hidden = true;
       debugBody.innerHTML = '';
 
       // Group 2 fieldset, prevPlanValue, status line
