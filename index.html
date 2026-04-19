@@ -63,6 +63,10 @@
     #group-earnings-input-manual .field { flex-direction: row; align-items: center; }
     #manual-afc { width: 9ch; }
 
+    /* ── Gap warnings ── */
+    #gap-warnings { margin-top: 0.5rem; font-size: 0.85rem; color: #c60; }
+    #gap-warnings ul { margin: 0.15rem 0 0; padding-left: 1.5em; }
+
     /* ── Debug panel ── */
     #debug-panel {
       margin-top: 0.75rem;
@@ -240,6 +244,7 @@
         <div id="afc-computed"></div>
         <div id="afc-date-range"></div>
         <div id="regular-earnings"></div>
+        <div id="gap-warnings"></div>
       </div>
     </div>
 
@@ -303,6 +308,7 @@
     const afcComputedEl     = document.getElementById('afc-computed');
     const afcDateRange      = document.getElementById('afc-date-range');
     const regularEarningsEl = document.getElementById('regular-earnings');
+    const gapWarningsEl     = document.getElementById('gap-warnings');
     const debugDetails     = document.getElementById('debug-details');
     const debugBody        = document.getElementById('debug-body');
     const debugPanelEl     = document.getElementById('debug-panel');
@@ -354,6 +360,7 @@
       afcComputedEl.textContent     = 'Extracting…';
       afcDateRange.textContent      = '';
       regularEarningsEl.textContent = '';
+      gapWarningsEl.innerHTML       = '';
       debugBody.innerHTML = '';
 
       cancelRequested = false;
@@ -379,6 +386,7 @@
 
       if (cancelRequested) {
         afcComputedEl.textContent = '';
+        gapWarningsEl.innerHTML   = '';
         lastStubs   = [];
         lastWindows = [];
         pdfFiles    = {};
@@ -463,6 +471,21 @@
         const regularAvg = lastWin.stubs.reduce((sum, s) => sum + scoreStub(s, 'regular'), 0) / 12;
         regularEarningsEl.textContent =
           `Regular avg earnings (${fmtDate(lastWin.start)} – ${fmtDate(lastWin.endIncl)}): $${fmtMoney(regularAvg)}/mo`;
+      }
+
+      const gaps = detectGaps(stubs);
+      gapWarningsEl.innerHTML = '';
+      if (gaps.length) {
+        const header = document.createElement('div');
+        header.textContent = `${gaps.length} gap${gaps.length !== 1 ? 's' : ''} in paystub coverage:`;
+        gapWarningsEl.appendChild(header);
+        const ul = document.createElement('ul');
+        for (const g of gaps) {
+          const li = document.createElement('li');
+          li.textContent = `${toYmd(fmtDate(g.from))} – ${toYmd(fmtDate(g.to))}`;
+          ul.appendChild(li);
+        }
+        gapWarningsEl.appendChild(ul);
       }
 
       debugDetails.classList.remove('disabled');
@@ -899,6 +922,34 @@
       return { selected, total: bestTotal };
     }
 
+    // ── Gap detection ────────────────────────────────────────────
+    // Returns an array of { from, to } Date pairs for uncovered spans between stubs.
+    // The expected cadence is inferred from the median pay-period length, so it
+    // handles both biweekly and semi-monthly (or any other) schedules.
+    function detectGaps(stubs) {
+      if (stubs.length < 2) return [];
+
+      const lengths = stubs.map(s =>
+        Math.round((s.endDate - s.beginDate) / 86400000) + 1
+      );
+      const sorted    = [...lengths].sort((a, b) => a - b);
+      const medianLen = sorted[Math.floor(sorted.length / 2)];
+      const threshold = 1 + medianLen * 0.5; // more than half a period = gap
+
+      const gaps = [];
+      for (let i = 0; i < stubs.length - 1; i++) {
+        const daysBetween =
+          Math.round((stubs[i + 1].beginDate - stubs[i].endDate) / 86400000);
+        if (daysBetween > threshold) {
+          gaps.push({
+            from: addDays(stubs[i].endDate, 1),
+            to:   addDays(stubs[i + 1].beginDate, -1),
+          });
+        }
+      }
+      return gaps;
+    }
+
     // ── AFC computation ──────────────────────────────────────────
     function computeAndFillAfc(planKey = planEl.value) {
       const config = PLAN_CONFIGS[planKey];
@@ -1126,6 +1177,7 @@
       afcComputedEl.textContent     = '';
       afcDateRange.textContent      = '';
       regularEarningsEl.textContent = '';
+      gapWarningsEl.innerHTML       = '';
 
       // Debug panel
       debugDetails.open = false;

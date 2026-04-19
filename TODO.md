@@ -1,12 +1,5 @@
 # ERS Pension Graph — Deferred Work
 
-## Paystub handling
-
-Decide how to handle gaps in the paystubs being processed, then do so:
-* notify and stop
-* notify and continue
-* don't even notify
-
 ## Vesting thresholds
 
 Each plan has a minimum service requirement before any pension is earned:
