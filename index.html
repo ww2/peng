@@ -225,6 +225,19 @@
         </div>
       </div>
 
+      <div style="grid-column: 1 / -1;">
+        <div class="field-pair">
+          <div class="field">
+            <label for="sl-hours">Unused sick leave (hours)</label>
+            <input type="number" id="sl-hours" min="0" step="1" placeholder="optional">
+          </div>
+          <div class="field">
+            <label for="sl-rate">Sick leave accrual (hours/month)</label>
+            <input type="number" id="sl-rate" min="0" step="0.5" value="14">
+          </div>
+        </div>
+      </div>
+
     </div>
   </fieldset>
 
@@ -292,6 +305,14 @@
       Pension at retirement
     </span>
     <span class="legend-item">
+      <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#1a8c4e" stroke-width="1.5"/></svg>
+      + current sick leave
+    </span>
+    <span class="legend-item">
+      <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#72b572" stroke-width="1.5" stroke-dasharray="4,3"/></svg>
+      + projected sick leave (no usage)
+    </span>
+    <span class="legend-item">
       <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#cc6600" stroke-width="1.5" stroke-dasharray="4,3"/></svg>
       COLA projection (on hover)
     </span>
@@ -317,6 +338,8 @@
       colorLabel     : '#333',
       colorMinor     : '#bbb',
       colorLine      : '#0066cc',
+      colorSLCurrent : '#1a8c4e',
+      colorSLProjected: '#72b572',
       colorCola      : '#cc6600',
       colorTitle     : '#222',
       colorCrosshair : '#aaa',
@@ -343,6 +366,8 @@
     const afcDateRange      = document.getElementById('afc-date-range');
     const regularEarningsEl = document.getElementById('regular-earnings');
     const gapWarningsEl     = document.getElementById('gap-warnings');
+    const slHoursEl         = document.getElementById('sl-hours');
+    const slRateEl          = document.getElementById('sl-rate');
     const debugDetails     = document.getElementById('debug-details');
     const debugBody        = document.getElementById('debug-body');
     const debugPanelEl     = document.getElementById('debug-panel');
@@ -780,10 +805,21 @@
       return new Date(+y, +m - 1, +d);
     }
 
+    // Convert unused sick leave hours to credited service months per ERS rules.
+    // Requires ≥ 60 days (480 hrs); 60 days → 3 months, each further 20 days → 1 month,
+    // remainder ≥ 10 days → 1 extra month.
+    function sickLeaveToMonths(hours) {
+      const days = hours / 8;
+      if (days < 60) return 0;
+      const whole     = Math.floor(days / 20);
+      const remainder = days % 20;
+      return whole + (remainder >= 10 ? 1 : 0);
+    }
+
     // ── Pension series ───────────────────────────────────────────
     // Returns an array of rows, one per candidate retirement month, from the
     // 1st of next month through 10 years past the first normal retirement month.
-    function calculateSeries({ plan, dob, enteredSvcMonths, asOfDate, lastDayOfSvc, afcMonthly }) {
+    function calculateSeries({ plan, dob, enteredSvcMonths, asOfDate, lastDayOfSvc, afcMonthly, slHours, slRate, slAsOf }) {
       const config = PLAN_CONFIGS[plan];
       const today  = new Date();
       const start  = new Date(today.getFullYear(), today.getMonth() + 1, 1);
@@ -830,15 +866,29 @@
         }
 
         let pension = null;
+        let pensionCurrentSL = null;
+        let pensionProjectedSL = null;
         if (isNormal || isEarly) {
           const yearsEarly = Math.max(0, normalRetAge - Math.floor(ageAtM));
           const factor     = Math.max(0, 1 - 0.06 * yearsEarly);
           pension = config.multiplier * (svcAtM / 12) * afcMonthly * factor;
+
+          if (slHours != null && slAsOf != null) {
+            const accrualEnd   = lastDayOfSvc
+              ? new Date(Math.min(lastDayOfSvc.getTime(), retDate.getTime()))
+              : retDate;
+            const currentMo    = sickLeaveToMonths(slHours);
+            const projectedMo  = sickLeaveToMonths(
+              slHours + slRate * Math.max(0, monthsBetween(slAsOf, accrualEnd))
+            );
+            pensionCurrentSL   = config.multiplier * ((svcAtM + currentMo)   / 12) * afcMonthly * factor;
+            pensionProjectedSL = config.multiplier * ((svcAtM + projectedMo) / 12) * afcMonthly * factor;
+          }
         }
 
         const status   = isNormal ? 'normal' : isEarly ? 'early' : 'ineligible';
         const isVested = svcAtM >= config.vestingMonths;
-        rows.push({ retDate, svcAtM, ageAtM, status, pension, isVested });
+        rows.push({ retDate, svcAtM, ageAtM, status, pension, isVested, pensionCurrentSL, pensionProjectedSL });
 
         if (status === 'normal' && !firstNormalDate) firstNormalDate = retDate;
         if (firstNormalDate && retDate >= addMonths(firstNormalDate, 120)) break;
@@ -1171,7 +1221,7 @@
       if (canCalculate()) runCalculate(); else drawChart();
     }
 
-    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl].forEach(el =>
+    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slRateEl].forEach(el =>
       el.addEventListener('input', maybeCalculate)
     );
     manualAfcEl.addEventListener('change', maybeCalculate);
@@ -1181,6 +1231,7 @@
       const lastDayOfSvc = lastDayVal ? parseIsoDate(lastDayVal) : null;
       const asOfDate     = lastDayOfSvc ?? parseIsoDate(svcAsOfEl.value);
 
+      const slHours = parseFloat(slHoursEl.value);
       const series  = calculateSeries({
         plan             : planEl.value,
         dob              : parseIsoDate(dobEl.value),
@@ -1188,6 +1239,9 @@
         asOfDate,
         lastDayOfSvc,
         afcMonthly       : parseFloat(manualAfcEl.value),
+        slHours          : isNaN(slHours) || slHours <= 0 ? null : slHours,
+        slRate           : parseFloat(slRateEl.value) || 14,
+        slAsOf           : asOfDate,
       });
       const eligible = series.filter(d => d.pension !== null);
       statusLine.textContent = eligible.length === 0
@@ -1197,8 +1251,9 @@
 
     function runClear() {
       // Form inputs
-      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl]
+      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl]
         .forEach(el => { el.value = ''; });
+      slRateEl.value = '14';
 
       // PDF picker state
       pdfFiles        = {};
@@ -1286,6 +1341,8 @@
       add('svcAsOf',   svcAsOfEl);
       add('lastDay',   lastDayEl);
       add('afc',       manualAfcEl);
+      add('slHours',   slHoursEl);
+      if (slRateEl.value && slRateEl.value !== '14') add('slRate', slRateEl);
       const qs = params.toString();
       return window.location.pathname + (qs ? '?' + qs : '');
     }
@@ -1294,7 +1351,7 @@
       reloadLink.href = buildReloadUrl();
     }
 
-    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl].forEach(el =>
+    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slRateEl].forEach(el =>
       el.addEventListener('input', updateReloadLink)
     );
     manualAfcEl.addEventListener('change', updateReloadLink);
@@ -1327,6 +1384,8 @@
       set(svcAsOfEl,   'svcAsOf');
       set(lastDayEl,   'lastDay');
       set(manualAfcEl, 'afc');
+      set(slHoursEl,   'slHours');
+      set(slRateEl,    'slRate');
       prevPlanValue             = planEl.value;
       earningsFieldset.disabled = !planEl.value;
       syncAsOfVisibility();
@@ -1361,7 +1420,9 @@
         ? Math.floor(Math.min(...eligible.map(d => d.pension)) / 1000) * 1000
         : 0;
       const yMax = eligible.length
-        ? Math.ceil(Math.max(...eligible.map(d => d.pension)) / 1000) * 1000
+        ? Math.ceil(Math.max(...eligible.flatMap(d =>
+            [d.pension, d.pensionCurrentSL, d.pensionProjectedSL].filter(v => v != null)
+          )) / 1000) * 1000
         : 5000;
 
       const xScale = d3.scaleTime().domain([xMin, xMax]).range([0, iW]);
@@ -1470,18 +1531,24 @@
         svg.append('defs').append('clipPath').attr('id', 'plot-clip')
           .append('rect').attr('width', iW).attr('height', iH);
 
-        const line = d3.line()
-          .defined(d => d.pension !== null)
-          .x(d => xScale(d.retDate))
-          .y(d => yScale(d.pension));
+        const makeCurve = (accessor, color, dashArray = null) => {
+          const line = d3.line()
+            .defined(d => accessor(d) != null)
+            .x(d => xScale(d.retDate))
+            .y(d => yScale(accessor(d)));
+          const path = g.append('g').attr('clip-path', 'url(#plot-clip)')
+            .append('path')
+            .datum(series)
+            .attr('fill', 'none')
+            .attr('stroke', color)
+            .attr('stroke-width', 1.5)
+            .attr('d', line);
+          if (dashArray) path.attr('stroke-dasharray', dashArray);
+        };
 
-        g.append('g').attr('clip-path', 'url(#plot-clip)')
-          .append('path')
-          .datum(series)
-          .attr('fill', 'none')
-          .attr('stroke', CHART.colorLine)
-          .attr('stroke-width', 1.5)
-          .attr('d', line);
+        makeCurve(d => d.pensionProjectedSL, CHART.colorSLProjected, '4,3');
+        makeCurve(d => d.pensionCurrentSL,   CHART.colorSLCurrent);
+        makeCurve(d => d.pension,            CHART.colorLine);
       }
 
       // ── Axis baselines ──────────────────────────────────────────
@@ -1532,6 +1599,12 @@
         tip.append('circle').attr('class', 'tip-dot')
           .attr('r', 3.5).attr('fill', CHART.colorLine);
 
+        tip.append('circle').attr('class', 'tip-dot-sl-current')
+          .attr('r', 3.5).attr('fill', CHART.colorSLCurrent).attr('display', 'none');
+
+        tip.append('circle').attr('class', 'tip-dot-sl-projected')
+          .attr('r', 3.5).attr('fill', CHART.colorSLProjected).attr('display', 'none');
+
         const colaPath = tip.append('g').attr('clip-path', 'url(#plot-clip)')
           .append('path')
           .attr('fill', 'none')
@@ -1551,7 +1624,7 @@
           .attr('width', iW).attr('height', iH)
           .attr('fill', 'none').attr('pointer-events', 'all')
           .on('mousemove', function(event) {
-            const [mx]      = d3.pointer(event);
+            const [mx, my] = d3.pointer(event);
             const hoverDate = xScale.invert(mx);
 
             let idx = bisect(eligible, hoverDate);
@@ -1562,38 +1635,60 @@
             const pt = eligible[idx];
 
             const px = xScale(pt.retDate);
-            const py = yScale(pt.pension);
 
-            tip.select('.tip-v').attr('x1', px).attr('x2', px);
-            tip.select('.tip-h').attr('y1', py).attr('y2', py);
-            tip.select('.tip-dot').attr('cx', px).attr('cy', py);
+            // All dots — shown on every active curve for context
+            const hasSL = pt.pensionCurrentSL != null;
+            tip.select('.tip-dot')
+              .attr('cx', px).attr('cy', yScale(pt.pension));
+            tip.select('.tip-dot-sl-current')
+              .attr('cx', px).attr('cy', hasSL ? yScale(pt.pensionCurrentSL)  : 0)
+              .attr('display', hasSL ? null : 'none');
+            tip.select('.tip-dot-sl-projected')
+              .attr('cx', px).attr('cy', hasSL ? yScale(pt.pensionProjectedSL) : 0)
+              .attr('display', hasSL ? null : 'none');
 
-            // COLA projection — fixed 20-year horizon from hovered retirement date
+            // Pick the curve closest to the cursor's Y position
+            const candidates = [
+              { pension: pt.pension,            label: '',           color: CHART.colorTitle },
+              ...(hasSL ? [
+                { pension: pt.pensionCurrentSL,   label: ' (+ cur. SL)',  color: CHART.colorSLCurrent   },
+                { pension: pt.pensionProjectedSL, label: ' (+ proj. SL)', color: CHART.colorSLProjected },
+              ] : []),
+            ];
+            const closest = candidates.reduce((best, c) =>
+              Math.abs(yScale(c.pension) - my) < Math.abs(yScale(best.pension) - my) ? c : best
+            );
+            const cy = yScale(closest.pension);
+
+            // COLA projection anchored to the closest curve
             const colaPoints = [];
             for (let m = 0; m <= 240; m++) {
               const d = addMonths(pt.retDate, m);
               colaPoints.push({
                 x: xScale(d),
-                y: yScale(pt.pension * Math.pow(1 + colaRate, m / 12)),
+                y: yScale(closest.pension * Math.pow(1 + colaRate, m / 12)),
               });
             }
             colaPath.attr('d', colaLine(colaPoints));
 
-            const pension = Math.round(pt.pension).toString()
-              .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-            tipText.text(
-              `${MONTHS[pt.retDate.getMonth()]} ${pt.retDate.getFullYear()} — $${pension}/mo`
-            );
+            tip.select('.tip-v').attr('x1', px).attr('x2', px);
+            tip.select('.tip-h').attr('y1', cy).attr('y2', cy);
+
+            const fmt = v => Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            tipText.selectAll('tspan').remove();
+            tipText.append('tspan').attr('dy', 0).attr('fill', closest.color)
+              .text(`${MONTHS[pt.retDate.getMonth()]} ${pt.retDate.getFullYear()} — $${fmt(closest.pension)}/mo${closest.label}`);
 
             const pad = 6;
             const bb  = tipText.node().getBBox();
             const lw  = bb.width  + pad * 2;
             const lh  = bb.height + pad * 2;
             const lx  = px + 12 + lw > iW ? px - 12 - lw : px + 12;
-            const ly  = Math.max(0, Math.min(iH - lh, py - lh / 2));
+            const ly  = Math.max(0, Math.min(iH - lh, cy - lh / 2));
 
             tipRect.attr('x', lx).attr('y', ly).attr('width', lw).attr('height', lh);
             tipText.attr('x', lx + pad).attr('y', ly + pad);
+            tipText.selectAll('tspan').attr('x', lx + pad);
 
             tip.attr('display', null);
           })

@@ -1,28 +1,8 @@
 # ERS Pension Graph — Deferred Work
 
-## Multiple curves / overlays — sick leave projection
+## Graphed annotations
 
-Sick leave accrued at retirement converts to additional service credit under ERS
-rules. The conversion formula (hours → credited months) needs to be sourced from
-ERS documentation before implementation.
-
-**Proposed inputs** (both optional; feature is suppressed if omitted):
-- Sick leave accrued — hours (number input)
-- Sick leave as of — date (aligns with the service "as of" date in most cases)
-
-**Proposed chart behaviour** (two additional lines, different colors from the
-main curve):
-1. **Sick leave — current amount**: at each candidate retirement month, adds the
-   entered sick leave hours (converted to service months) as a fixed lump sum on
-   top of the credited service. The sick leave balance does not grow — this shows
-   the pension impact of cashing out exactly what the member has now.
-2. **Sick leave — projected accrual**: same as above, but the sick leave balance
-   grows at **14 hours/month** from the "as of" date to the candidate retirement
-   date. This shows the pension impact if the member continues accruing at the
-   standard rate without using any sick leave before retiring.
-
-The existing (no sick leave) curve should remain visible as a baseline, giving
-the user three lines total: base, current sick leave, and projected sick leave.
+Can you add a dot on each line to show when it crosses each $1000 mark?
 
 ## Annual pay increases
 
