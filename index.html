@@ -238,6 +238,11 @@
         </div>
       </div>
 
+      <div class="field">
+        <label for="raise-rate">Annual pay raise (%)</label>
+        <input type="number" id="raise-rate" min="0" max="20" step="0.1" placeholder="optional">
+      </div>
+
     </div>
   </fieldset>
 
@@ -368,6 +373,7 @@
     const gapWarningsEl     = document.getElementById('gap-warnings');
     const slHoursEl         = document.getElementById('sl-hours');
     const slRateEl          = document.getElementById('sl-rate');
+    const raiseRateEl       = document.getElementById('raise-rate');
     const debugDetails     = document.getElementById('debug-details');
     const debugBody        = document.getElementById('debug-body');
     const debugPanelEl     = document.getElementById('debug-panel');
@@ -525,12 +531,7 @@
       lastStubs   = stubs;
       lastWindows = windows;
 
-      const lastWin = lastWindows[lastWindows.length - 1];
-      if (lastWin) {
-        const regularAvg = lastWin.stubs.reduce((sum, s) => sum + scoreStub(s, 'regular'), 0) / 12;
-        regularEarningsEl.textContent =
-          `Regular avg earnings (${fmtDate(lastWin.start)} – ${fmtDate(lastWin.endIncl)}): $${fmtMoney(regularAvg)}/mo`;
-      }
+      updateRegularEarningsDisplay();
 
       const gaps = detectGaps(stubs);
       gapWarningsEl.innerHTML = '';
@@ -819,7 +820,7 @@
     // ── Pension series ───────────────────────────────────────────
     // Returns an array of rows, one per candidate retirement month, from the
     // 1st of next month through 10 years past the first normal retirement month.
-    function calculateSeries({ plan, dob, enteredSvcMonths, asOfDate, lastDayOfSvc, afcMonthly, slHours, slRate, slAsOf }) {
+    function calculateSeries({ plan, dob, enteredSvcMonths, asOfDate, lastDayOfSvc, afcMonthly, slHours, slRate, slAsOf, raiseRate = 0 }) {
       const config = PLAN_CONFIGS[plan];
       const today  = new Date();
       const start  = new Date(today.getFullYear(), today.getMonth() + 1, 1);
@@ -869,9 +870,13 @@
         let pensionCurrentSL = null;
         let pensionProjectedSL = null;
         if (isNormal || isEarly) {
+          const yearsAhead   = Math.max(0, monthsBetween(asOfDate, retDate)) / 12;
+          const effectiveAfc = raiseRate > 0
+            ? afcMonthly * Math.pow(1 + raiseRate, yearsAhead)
+            : afcMonthly;
           const yearsEarly = Math.max(0, normalRetAge - Math.floor(ageAtM));
           const factor     = Math.max(0, 1 - 0.06 * yearsEarly);
-          pension = config.multiplier * (svcAtM / 12) * afcMonthly * factor;
+          pension = config.multiplier * (svcAtM / 12) * effectiveAfc * factor;
 
           if (slHours != null && slAsOf != null) {
             const accrualEnd   = lastDayOfSvc
@@ -881,8 +886,8 @@
             const projectedMo  = sickLeaveToMonths(
               slHours + slRate * Math.max(0, monthsBetween(slAsOf, accrualEnd))
             );
-            pensionCurrentSL   = config.multiplier * ((svcAtM + currentMo)   / 12) * afcMonthly * factor;
-            pensionProjectedSL = config.multiplier * ((svcAtM + projectedMo) / 12) * afcMonthly * factor;
+            pensionCurrentSL   = config.multiplier * ((svcAtM + currentMo)   / 12) * effectiveAfc * factor;
+            pensionProjectedSL = config.multiplier * ((svcAtM + projectedMo) / 12) * effectiveAfc * factor;
           }
         }
 
@@ -1033,6 +1038,24 @@
         }
       }
       return gaps;
+    }
+
+    // ── Regular earnings display ─────────────────────────────────
+    function updateRegularEarningsDisplay() {
+      const lastWin = lastWindows[lastWindows.length - 1];
+      if (!lastWin) return;
+      const regularAvg = lastWin.stubs.reduce((sum, s) => sum + scoreStub(s, 'regular'), 0) / 12;
+      const raiseRate  = parseFloat(raiseRateEl.value) / 100 || 0;
+      if (raiseRate > 0) {
+        const today        = new Date();
+        const yearsElapsed = Math.max(0, monthsBetween(lastWin.endIncl, today)) / 12;
+        const projected    = regularAvg * Math.pow(1 + raiseRate, yearsElapsed);
+        regularEarningsEl.textContent =
+          `Regular avg earnings (${fmtDate(lastWin.start)} – ${fmtDate(lastWin.endIncl)}): $${fmtMoney(regularAvg)}/mo → now: $${fmtMoney(projected)}/mo`;
+      } else {
+        regularEarningsEl.textContent =
+          `Regular avg earnings (${fmtDate(lastWin.start)} – ${fmtDate(lastWin.endIncl)}): $${fmtMoney(regularAvg)}/mo`;
+      }
     }
 
     // ── AFC computation ──────────────────────────────────────────
@@ -1225,13 +1248,19 @@
       el.addEventListener('input', maybeCalculate)
     );
     manualAfcEl.addEventListener('change', maybeCalculate);
+    raiseRateEl.addEventListener('input', () => {
+      updateRegularEarningsDisplay();
+      maybeCalculate();
+      updateReloadLink();
+    });
 
     function runCalculate() {
       const lastDayVal   = lastDayEl.value;
       const lastDayOfSvc = lastDayVal ? parseIsoDate(lastDayVal) : null;
       const asOfDate     = lastDayOfSvc ?? parseIsoDate(svcAsOfEl.value);
 
-      const slHours = parseFloat(slHoursEl.value);
+      const slHours  = parseFloat(slHoursEl.value);
+      const raiseRate = parseFloat(raiseRateEl.value) / 100 || 0;
       const series  = calculateSeries({
         plan             : planEl.value,
         dob              : parseIsoDate(dobEl.value),
@@ -1242,6 +1271,7 @@
         slHours          : isNaN(slHours) || slHours <= 0 ? null : slHours,
         slRate           : parseFloat(slRateEl.value) || 14,
         slAsOf           : asOfDate,
+        raiseRate,
       });
       const eligible = series.filter(d => d.pension !== null);
       statusLine.textContent = eligible.length === 0
@@ -1251,7 +1281,7 @@
 
     function runClear() {
       // Form inputs
-      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl]
+      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, raiseRateEl]
         .forEach(el => { el.value = ''; });
       slRateEl.value = '14';
 
@@ -1341,8 +1371,9 @@
       add('svcAsOf',   svcAsOfEl);
       add('lastDay',   lastDayEl);
       add('afc',       manualAfcEl);
-      add('slHours',   slHoursEl);
+      add('slHours',    slHoursEl);
       if (slRateEl.value && slRateEl.value !== '14') add('slRate', slRateEl);
+      add('raiseRate',  raiseRateEl);
       const qs = params.toString();
       return window.location.pathname + (qs ? '?' + qs : '');
     }
@@ -1354,6 +1385,7 @@
     [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slRateEl].forEach(el =>
       el.addEventListener('input', updateReloadLink)
     );
+    // raiseRateEl updateReloadLink is handled in its own listener above
     manualAfcEl.addEventListener('change', updateReloadLink);
 
     function commitAfc(e) {
@@ -1386,6 +1418,7 @@
       set(manualAfcEl, 'afc');
       set(slHoursEl,   'slHours');
       set(slRateEl,    'slRate');
+      set(raiseRateEl, 'raiseRate');
       prevPlanValue             = planEl.value;
       earningsFieldset.disabled = !planEl.value;
       syncAsOfVisibility();

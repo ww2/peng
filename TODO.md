@@ -4,13 +4,6 @@
 
 Can you add a dot on each line to show when it crosses each $1000 mark?
 
-## Annual pay increases
-
-For Unit 8 positions like mine, and likely for all similar positions, there's an
-annual mandated raise which is supposed to relate to COLA.  Would it be better to
-derive that from the changes in regular pay in the paystubs, or add an optional
-form field to let the user enter that?
-
 ## Mixed service
 
 Members with service under more than one plan (e.g. Hybrid + Noncontributory)
