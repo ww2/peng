@@ -1,21 +1,5 @@
 # ERS Pension Graph — Deferred Work
 
-## Vesting thresholds
-
-Each plan has a minimum service requirement before any pension is earned:
-
-| Plan | Vesting |
-|---|---|
-| hybrid-post2012 | 10 yos |
-| hybrid-pre2012 | 5 yos |
-| contributory-post2012 | 10 yos |
-| contributory-pre2012 | 5 yos |
-
-The chart currently ignores vesting — it shows a pension value for any month
-where the age/service early-retirement thresholds are met, even if the member
-isn't yet vested. A member with, say, 8 years of service under `hybrid-post2012`
-would see a curve when they should see nothing until 10 yos.
-
 ## Post-retirement cost-of-living increases
 
 Each plan has an annual COLA applied after retirement:
@@ -55,6 +39,7 @@ main curve):
 
 The existing (no sick leave) curve should remain visible as a baseline, giving
 the user three lines total: base, current sick leave, and projected sick leave.
+
 ## Mixed service
 
 Members with service under more than one plan (e.g. Hybrid + Noncontributory)
@@ -62,8 +47,6 @@ are not supported. The additive formula is known — each plan segment contribut
 `multiplier × (segmentMonths / 12) × segmentAFC × factor` — but the UI would
 need a way to enter multiple service/AFC blocks, and the eligibility logic would
 need to determine which plan's thresholds govern early/normal status.
-
-At least one intended user has mixed Hybrid + Noncontributory service.
 
 ## Survivor benefit options
 

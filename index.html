@@ -278,6 +278,7 @@
 
     const CHART = {
       font           : 'monospace',
+      colorNotVested : '#e8e8e8',
       colorIneligible: '#f5f5f5',
       colorGrid      : '#e0e0e0',
       colorAxis      : '#555',
@@ -316,11 +317,11 @@
 
     // ── Plan configs ─────────────────────────────────────────────
     const PLAN_CONFIGS = {
-      'hybrid-post2012':       { multiplier: 0.0175, N: 5, mode: 'regular' },
-      'hybrid-pre2012':        { multiplier: 0.0200, N: 3, mode: 'total'   },
-      'contributory-post2012': { multiplier: 0.0175, N: 5, mode: 'regular' },
-      'contributory-pre2012':  { multiplier: 0.0200, N: 3, mode: 'total'   },
-      'noncontributory':       { multiplier: 0.0125, N: 3, mode: 'total'   },
+      'hybrid-post2012':       { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120 },
+      'hybrid-pre2012':        { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60 },
+      'contributory-post2012': { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120 },
+      'contributory-pre2012':  { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60 },
+      'noncontributory':       { multiplier: 0.0125, N: 3, mode: 'total',   vestingMonths: 120 },
     };
 
     // ── Directory picker ─────────────────────────────────────────
@@ -802,8 +803,9 @@
           pension = config.multiplier * (svcAtM / 12) * afcMonthly * factor;
         }
 
-        const status = isNormal ? 'normal' : isEarly ? 'early' : 'ineligible';
-        rows.push({ retDate, svcAtM, ageAtM, status, pension });
+        const status   = isNormal ? 'normal' : isEarly ? 'early' : 'ineligible';
+        const isVested = svcAtM >= config.vestingMonths;
+        rows.push({ retDate, svcAtM, ageAtM, status, pension, isVested });
 
         if (status === 'normal' && !firstNormalDate) firstNormalDate = retDate;
         if (firstNormalDate && retDate >= addMonths(firstNormalDate, 120)) break;
@@ -1347,16 +1349,37 @@
 
       // ── Ineligible region shading ───────────────────────────────
       if (series && series.length) {
+        const firstVested   = series.find(d => d.isVested);
         const firstEligible = series.find(d => d.pension !== null);
-        const shadedX2 = firstEligible ? xScale(firstEligible.retDate) : iW;
-        if (shadedX2 > 0) {
+        const vestedX   = firstVested   ? xScale(firstVested.retDate)   : iW;
+        const eligibleX = firstEligible ? xScale(firstEligible.retDate) : iW;
+
+        // Not yet vested
+        if (vestedX > 0) {
           g.append('rect')
             .attr('x', 0).attr('y', 0)
-            .attr('width', shadedX2).attr('height', iH)
-            .attr('fill', CHART.colorIneligible);
-          if (shadedX2 > 30) {
+            .attr('width', vestedX).attr('height', iH)
+            .attr('fill', CHART.colorNotVested);
+          if (vestedX > 30) {
             g.append('text')
-              .attr('transform', `translate(${shadedX2 / 2},${iH / 2}) rotate(-90)`)
+              .attr('transform', `translate(${vestedX / 2},${iH / 2}) rotate(-90)`)
+              .attr('text-anchor', 'middle')
+              .attr('font-family', CHART.font).attr('font-size', '0.75rem')
+              .attr('fill', CHART.colorMinor)
+              .text('Not yet vested');
+          }
+        }
+
+        // Vested but not yet eligible to collect
+        if (eligibleX > vestedX) {
+          g.append('rect')
+            .attr('x', vestedX).attr('y', 0)
+            .attr('width', eligibleX - vestedX).attr('height', iH)
+            .attr('fill', CHART.colorIneligible);
+          if (eligibleX - vestedX > 30) {
+            const midX = vestedX + (eligibleX - vestedX) / 2;
+            g.append('text')
+              .attr('transform', `translate(${midX},${iH / 2}) rotate(-90)`)
               .attr('text-anchor', 'middle')
               .attr('font-family', CHART.font).attr('font-size', '0.75rem')
               .attr('fill', CHART.colorMinor)
