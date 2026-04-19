@@ -1,9 +1,5 @@
 # ERS Pension Graph — Deferred Work
 
-## Graphed annotations
-
-Can you add a dot on each line to show when it crosses each $1000 mark?
-
 ## Mixed service
 
 Members with service under more than one plan (e.g. Hybrid + Noncontributory)
