@@ -232,6 +232,10 @@
             <input type="number" id="sl-hours" min="0" step="1" placeholder="optional">
           </div>
           <div class="field">
+            <label for="sl-as-of">Sick leave as of</label>
+            <input type="date" id="sl-as-of">
+          </div>
+          <div class="field">
             <label for="sl-rate">Sick leave accrual (hours/month)</label>
             <input type="number" id="sl-rate" min="0" step="0.5" value="14">
           </div>
@@ -345,6 +349,7 @@
     const regularEarningsEl = document.getElementById('regular-earnings');
     const gapWarningsEl     = document.getElementById('gap-warnings');
     const slHoursEl         = document.getElementById('sl-hours');
+    const slAsOfEl          = document.getElementById('sl-as-of');
     const slRateEl          = document.getElementById('sl-rate');
     const raiseRateEl       = document.getElementById('raise-rate');
     const debugDetails     = document.getElementById('debug-details');
@@ -1403,14 +1408,16 @@
         dobEl.value &&
         (lastDayEl.value || svcAsOfEl.value)
       );
-      return group1Ok && parseFloat(manualAfcEl.value) > 0;
+      const slHours = parseFloat(slHoursEl.value);
+      const slOk = isNaN(slHours) || slHours <= 0 || !!slAsOfEl.value;
+      return group1Ok && parseFloat(manualAfcEl.value) > 0 && slOk;
     }
 
     function maybeCalculate() {
       if (canCalculate()) runCalculate(); else drawChart();
     }
 
-    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slRateEl].forEach(el =>
+    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
       el.addEventListener('input', maybeCalculate)
     );
     manualAfcEl.addEventListener('change', maybeCalculate);
@@ -1426,6 +1433,9 @@
       const asOfDate     = lastDayOfSvc ?? parseIsoDate(svcAsOfEl.value);
 
       const slHours  = parseFloat(slHoursEl.value);
+      const slAsOf   = slAsOfEl.value ? parseIsoDate(slAsOfEl.value) : null;
+      if (!isNaN(slHours) && slHours <= 0)
+        console.warn(`Sick leave hours (${slHours}) must be positive; ignoring.`);
       const raiseRate = parseFloat(raiseRateEl.value) / 100 || 0;
       const series  = calculateSeries({
         plan             : planEl.value,
@@ -1436,20 +1446,20 @@
         afcMonthly       : parseFloat(manualAfcEl.value),
         slHours          : isNaN(slHours) || slHours <= 0 ? null : slHours,
         slRate           : parseFloat(slRateEl.value) || 14,
-        slAsOf           : asOfDate,
+        slAsOf,
         raiseRate,
       });
       window._debug.lastSeries = series;
       const eligible = series.filter(d => d.pension !== null);
       statusLine.textContent = eligible.length === 0
         ? 'No eligible retirement dates found.' : '';
-      const hasSL = !(isNaN(slHours) || slHours <= 0);
+      const hasSL = !(isNaN(slHours) || slHours <= 0) && slAsOf !== null;
       drawChart(series, { hasSL });
     }
 
     function runClear() {
       // Form inputs
-      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, raiseRateEl]
+      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, slAsOfEl, raiseRateEl]
         .forEach(el => { el.value = ''; });
       slRateEl.value = '14';
 
@@ -1540,6 +1550,7 @@
       add('lastDay',   lastDayEl);
       add('afc',       manualAfcEl);
       add('slHours',    slHoursEl);
+      add('slAsOf',     slAsOfEl);
       if (slRateEl.value && slRateEl.value !== '14') add('slRate', slRateEl);
       add('raiseRate',  raiseRateEl);
       const qs = params.toString();
@@ -1550,7 +1561,7 @@
       reloadLink.href = buildReloadUrl();
     }
 
-    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slRateEl].forEach(el =>
+    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
       el.addEventListener('input', updateReloadLink)
     );
     // raiseRateEl updateReloadLink is handled in its own listener above
@@ -1572,7 +1583,7 @@
     manualAfcEl.addEventListener('input',   commitAfc);
 
     // ── URL parameter pre-fill ────────────────────────────────────
-    // Supported params: plan, dob, svcYears, svcMonths, lastDay, afc
+    // Supported params: plan, dob, svcYears, svcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate, raiseRate
     // Example: ?plan=hybrid-post2012&dob=1975-06-15&svcYears=15&svcMonths=3&afc=4500
     {
       const p = new URLSearchParams(window.location.search);
@@ -1585,6 +1596,7 @@
       set(lastDayEl,   'lastDay');
       set(manualAfcEl, 'afc');
       set(slHoursEl,   'slHours');
+      set(slAsOfEl,    'slAsOf');
       set(slRateEl,    'slRate');
       set(raiseRateEl, 'raiseRate');
       prevPlanValue             = planEl.value;
