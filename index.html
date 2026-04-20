@@ -295,34 +295,6 @@
     <span id="status-line"></span>
   </div>
 
-  <!-- ── Chart legend ─────────────────────────────────────────── -->
-  <div id="chart-legend">
-    <span class="legend-item">
-      <svg width="24" height="10"><rect width="24" height="10" fill="#e8e8e8"/></svg>
-      Not yet vested
-    </span>
-    <span class="legend-item">
-      <svg width="24" height="10"><rect width="24" height="10" fill="#f5f5f5" stroke="#ccc" stroke-width="0.5"/></svg>
-      Vested, not yet eligible
-    </span>
-    <span class="legend-item">
-      <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#0066cc" stroke-width="1.5"/></svg>
-      Pension at retirement
-    </span>
-    <span class="legend-item">
-      <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#1a8c4e" stroke-width="1.5"/></svg>
-      + current sick leave
-    </span>
-    <span class="legend-item">
-      <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#72b572" stroke-width="1.5" stroke-dasharray="4,3"/></svg>
-      + projected sick leave (no usage)
-    </span>
-    <span class="legend-item">
-      <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#cc6600" stroke-width="1.5" stroke-dasharray="4,3"/></svg>
-      COLA projection (on hover)
-    </span>
-  </div>
-
   <!-- ── Chart ────────────────────────────────────────────────── -->
   <svg id="chart-svg"></svg>
 
@@ -1471,7 +1443,8 @@
       const eligible = series.filter(d => d.pension !== null);
       statusLine.textContent = eligible.length === 0
         ? 'No eligible retirement dates found.' : '';
-      drawChart(series);
+      const hasSL = !(isNaN(slHours) || slHours <= 0);
+      drawChart(series, { hasSL });
     }
 
     function runClear() {
@@ -1621,12 +1594,12 @@
       if (canCalculate()) requestAnimationFrame(runCalculate);
     }
     // ── Chart ────────────────────────────────────────────────────
-    function drawChart(series = null) {
+    function drawChart(series = null, { hasSL = false } = {}) {
       const svg = d3.select('#chart-svg');
       const W   = svg.node().clientWidth;
       const H   = svg.node().clientHeight;
 
-      const margin = { top: 24, right: 20, bottom: 52, left: 62 };
+      const margin = { top: 24, right: 20, bottom: 90, left: 62 };
       const iW = W - margin.left - margin.right;
       const iH = H - margin.top  - margin.bottom;
 
@@ -1707,7 +1680,7 @@
               .attr('text-anchor', 'middle')
               .attr('font-family', CHART.font).attr('font-size', '0.75rem')
               .attr('fill', CHART.colorMinor)
-              .text('Not yet eligible');
+              .text('Vested, not yet eligible');
           }
         }
       }
@@ -1723,7 +1696,13 @@
         .attr('y1', iH).attr('y2', iH + 6)
         .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
 
-      g.append('g').selectAll('text').data(xMajorVals).join('text')
+      // Thin year labels to avoid collision: pick the smallest nice interval
+      // (1, 2, 5, 10 yrs) such that labels are at least 36px apart.
+      const pxPerYear = iW / Math.max(1, xMax.getFullYear() - xMin.getFullYear());
+      const rawEvery  = Math.ceil(36 / pxPerYear);
+      const labelEvery = rawEvery <= 1 ? 1 : rawEvery <= 2 ? 2 : rawEvery <= 5 ? 5 : 10;
+      const xLabelVals = xMajorVals.filter(d => d.getFullYear() % labelEvery === 0);
+      g.append('g').selectAll('text').data(xLabelVals).join('text')
         .attr('x', d => xScale(d)).attr('y', iH + 18)
         .attr('text-anchor', 'middle')
         .attr('font-family', CHART.font).attr('font-size', '0.75rem').attr('fill', CHART.colorLabel)
@@ -1790,34 +1769,64 @@
         .attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', iH)
         .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
 
-      // ── Legend ──────────────────────────────────────────────────
+      // ── Legend (left-justified rows below x-axis label) ─────────
       if (series && eligible.length) {
-        const hasSLData = eligible.some(d => d.pensionCurrentSL != null);
-        const legendEntries = [
-          { color: CHART.colorLine,         dash: null,  label: 'This calculator' },
-          { color: CHART.colorOfficial,     dash: null,  label: 'Official ERS'    },
-          ...(hasSLData ? [
-            { color: CHART.colorSLCurrent,  dash: null,  label: '+ current SL'   },
-            { color: CHART.colorSLProjected,dash: '4,3', label: '+ projected SL' },
+        const hasNotVested     = series.some(d => !d.isVested);
+        const hasVestedNotElig = series.some(d => d.isVested && d.pension === null);
+        const entries = [
+          ...(hasNotVested     ? [{ type: 'rect', fill: CHART.colorNotVested,   label: 'Not yet vested'                      }] : []),
+          ...(hasVestedNotElig ? [{ type: 'rect', fill: CHART.colorIneligible,  label: 'Vested, not yet eligible'            }] : []),
+          { type: 'line', color: CHART.colorLine,          dash: null,  label: 'Pension at retirement'                      },
+          { type: 'line', color: CHART.colorOfficial,      dash: null,  label: 'Official ERS'                               },
+          ...(hasSL ? [
+            { type: 'line', color: CHART.colorSLCurrent,   dash: null,  label: '+ current sick leave'                      },
+            { type: 'line', color: CHART.colorSLProjected, dash: '4,3', label: '+ projected sick leave (no usage)'         },
           ] : []),
+          { type: 'line', color: CHART.colorCola,          dash: '4,3', label: 'COLA projection (on hover)'                },
         ];
-        const rowH = 18, legW = 132, pad = 8;
-        const legH = legendEntries.length * rowH + pad;
-        const leg  = g.append('g').attr('transform', `translate(${iW - legW - 4},4)`);
-        leg.append('rect')
-          .attr('width', legW).attr('height', legH)
-          .attr('fill', 'white').attr('stroke', CHART.colorMinor).attr('rx', 3).attr('opacity', 0.9);
-        legendEntries.forEach((e, i) => {
-          const y = pad + i * rowH;
-          const ln = leg.append('line')
-            .attr('x1', pad).attr('x2', pad + 20).attr('y1', y).attr('y2', y)
-            .attr('stroke', e.color).attr('stroke-width', 1.5);
-          if (e.dash) ln.attr('stroke-dasharray', e.dash);
-          leg.append('text')
-            .attr('x', pad + 26).attr('y', y)
-            .attr('dominant-baseline', 'middle')
-            .attr('font-family', CHART.font).attr('font-size', '0.7rem').attr('fill', CHART.colorLabel)
-            .text(e.label);
+
+        const swW = 20, gap1 = 5, gap2 = 18, charW = 7;
+        const entryW = e => swW + gap1 + e.label.length * charW + gap2;
+
+        // Wrap into rows left-to-right
+        const rows = [];
+        let row = [], rowUsed = 0;
+        entries.forEach(e => {
+          const w = entryW(e);
+          if (row.length > 0 && rowUsed + w - gap2 > iW) {
+            rows.push(row);
+            row = [{ ...e, x: 0 }];
+            rowUsed = w;
+          } else {
+            row.push({ ...e, x: rowUsed });
+            rowUsed += w;
+          }
+        });
+        if (row.length) rows.push(row);
+
+        const rowH = 18, legStartY = iH + 58;
+        const leg  = g.append('g');
+        rows.forEach((rowItems, ri) => {
+          const y = legStartY + ri * rowH;
+          rowItems.forEach(e => {
+            if (e.type === 'rect') {
+              leg.append('rect')
+                .attr('x', e.x).attr('y', y - 5)
+                .attr('width', swW).attr('height', 10)
+                .attr('fill', e.fill).attr('stroke', CHART.colorMinor).attr('stroke-width', 0.5);
+            } else {
+              const ln = leg.append('line')
+                .attr('x1', e.x).attr('x2', e.x + swW)
+                .attr('y1', y).attr('y2', y)
+                .attr('stroke', e.color).attr('stroke-width', 1.5);
+              if (e.dash) ln.attr('stroke-dasharray', e.dash);
+            }
+            leg.append('text')
+              .attr('x', e.x + swW + gap1).attr('y', y)
+              .attr('dominant-baseline', 'middle')
+              .attr('font-family', CHART.font).attr('font-size', '0.7rem').attr('fill', CHART.colorLabel)
+              .text(e.label);
+          });
         });
       }
 
