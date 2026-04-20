@@ -59,6 +59,35 @@
     .field-pair { display: flex; gap: 0.5rem; }
     .field-pair .field { flex: 1; }
 
+    .svc-grid {
+      display: grid;
+      grid-template-columns: auto auto auto auto;
+      column-gap: 1rem;
+      row-gap: 0.15rem;
+      align-items: end;
+      justify-content: start;
+    }
+    .sl-grid {
+      display: grid;
+      grid-template-columns: auto auto auto;
+      column-gap: 1rem;
+      row-gap: 0.15rem;
+      align-items: end;
+      justify-content: start;
+    }
+    .no-spin::-webkit-inner-spin-button,
+    .no-spin::-webkit-outer-spin-button { -webkit-appearance: none; }
+    .no-spin { -moz-appearance: textfield; appearance: textfield; }
+    .svc-grid > label, .svc-grid > .svc-hdr,
+    .sl-grid  > label, .sl-grid  > .svc-hdr {
+      font-size: 0.8rem; color: #555; align-self: end;
+    }
+    .svc-grid input[type="date"], .svc-grid input[type="number"],
+    .sl-grid  input[type="date"], .sl-grid  input[type="number"] {
+      font-family: monospace; font-size: 0.9rem; padding: 0.25rem; width: 100%;
+    }
+    input[type="date"] { max-width: 16ch; }
+
     /* ── Manual AFC field ── */
     #group-earnings-input-manual .field { flex-direction: row; align-items: center; }
     #manual-afc { width: 9ch; }
@@ -200,51 +229,43 @@
         <input type="date" id="dob">
       </div>
 
-      <div>
-        <div class="field-pair">
-          <div class="field">
-            <label for="svc-years">Credited service — years</label>
-            <input type="number" id="svc-years" min="0" max="50" step="1" placeholder="0">
-          </div>
-          <div class="field">
-            <label for="svc-months">months</label>
-            <input type="number" id="svc-months" min="0" max="11" step="1" placeholder="0">
-          </div>
-        </div>
-        <div class="field" id="svc-as-of-field" style="margin-top:0.4rem;">
-          <label for="svc-as-of">Service credited as of</label>
-          <input type="date" id="svc-as-of">
-        </div>
-      </div>
+      <div style="grid-column: 1 / -1;">
+        <div class="svc-grid">
+          <span class="svc-hdr" style="grid-column: 1 / 4;">Credited service</span>
+          <label for="last-day" class="svc-hdr">Last day of service</label>
 
-      <div class="field">
-        <label for="last-day">Last day of service <em>(blank = still active)</em></label>
-        <div class="input-row">
-          <input type="date" id="last-day">
-          <button type="button" id="last-day-clear" title="Clear">✕</button>
+          <label for="svc-years">years</label>
+          <label for="svc-months">months</label>
+          <label for="svc-as-of" id="svc-as-of-label">as of</label>
+          <label for="last-day" style="color:#888;">(blank = still active)</label>
+
+          <input type="number" id="svc-years" min="0" max="50" step="1" placeholder="0" style="width: 6.5ch">
+          <input type="number" id="svc-months" min="0" max="11" step="1" placeholder="0" style="width: 5.5ch">
+          <div id="svc-as-of-field"><input type="date" id="svc-as-of"></div>
+          <div class="input-row">
+            <input type="date" id="last-day">
+            <button type="button" id="last-day-clear" title="Clear">✕</button>
+          </div>
         </div>
       </div>
 
       <div style="grid-column: 1 / -1;">
-        <div class="field-pair">
-          <div class="field">
-            <label for="sl-hours">Unused sick leave (hours)</label>
-            <input type="number" id="sl-hours" min="0" step="1" placeholder="optional">
-          </div>
-          <div class="field">
-            <label for="sl-as-of">Sick leave as of</label>
-            <input type="date" id="sl-as-of">
-          </div>
-          <div class="field">
-            <label for="sl-rate">Sick leave accrual (hours/month)</label>
-            <input type="number" id="sl-rate" min="0" step="0.5" value="14">
-          </div>
+        <div class="sl-grid">
+          <span class="svc-hdr" style="grid-column: 1 / -1;">Sick leave</span>
+
+          <label for="sl-hours">Unused hours</label>
+          <label for="sl-as-of">as of</label>
+          <label for="sl-rate">accrual (hours/month)</label>
+
+          <input type="number" id="sl-hours" min="0" step="1" placeholder="optional" style="width:12ch">
+          <input type="date" id="sl-as-of">
+          <input type="number" id="sl-rate" min="0" step="0.5" value="14" class="no-spin" style="width:5ch">
         </div>
       </div>
 
       <div class="field">
         <label for="raise-rate">Annual pay raise (%)</label>
-        <input type="number" id="raise-rate" min="0" max="20" step="0.1" placeholder="optional">
+        <input type="number" id="raise-rate" min="0" max="20" step="0.1" placeholder="optional" style="width:12ch">
       </div>
 
     </div>
@@ -334,6 +355,7 @@
     const svcMonthsEl      = document.getElementById('svc-months');
     const svcAsOfEl        = document.getElementById('svc-as-of');
     const svcAsOfField     = document.getElementById('svc-as-of-field');
+    const svcAsOfLabel     = document.getElementById('svc-as-of-label');
     const lastDayEl        = document.getElementById('last-day');
     const manualAfcEl      = document.getElementById('manual-afc');
     const earningsFieldset = document.getElementById('group-earnings-input');
@@ -1525,7 +1547,9 @@
 
     // ── "As of" visibility: shown when lastDay blank, hidden when filled ─
     function syncAsOfVisibility() {
-      svcAsOfField.hidden = !!lastDayEl.value;
+      const hide = !!lastDayEl.value;
+      svcAsOfField.hidden = hide;
+      svcAsOfLabel.hidden = hide;
     }
 
     lastDayEl.addEventListener('input', syncAsOfVisibility);
