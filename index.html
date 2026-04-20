@@ -381,11 +381,11 @@
 
     // ── Plan configs ─────────────────────────────────────────────
     const PLAN_CONFIGS = {
-      'hybrid-post2012':       { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120, colaRate: 0.015 },
-      'hybrid-pre2012':        { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025 },
-      'contributory-post2012': { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120, colaRate: 0.015 },
-      'contributory-pre2012':  { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025 },
-      'noncontributory':       { multiplier: 0.0125, N: 3, mode: 'total',   vestingMonths: 120, colaRate: 0.025 },
+      'hybrid-post2012':       { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120, colaRate: 0.015, earlyPenalty: 0.05 },
+      'hybrid-pre2012':        { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025, earlyPenalty: 0.05 },
+      'contributory-post2012': { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120, colaRate: 0.015, earlyPenalty: 0.05 },
+      'contributory-pre2012':  { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025, earlyPenalty: 0.05 },
+      'noncontributory':       { multiplier: 0.0125, N: 3, mode: 'total',   vestingMonths: 120, colaRate: 0.025, earlyPenalty: 0.06 },
     };
 
     // ── Directory picker ─────────────────────────────────────────
@@ -875,7 +875,7 @@
             ? afcMonthly * Math.pow(1 + raiseRate, yearsAhead)
             : afcMonthly;
           const yearsEarly = Math.max(0, normalRetAge - Math.floor(ageAtM));
-          const factor     = Math.max(0, 1 - 0.06 * yearsEarly);
+          const factor     = Math.max(0, 1 - config.earlyPenalty * yearsEarly);
           pension = config.multiplier * (svcAtM / 12) * effectiveAfc * factor;
 
           if (slHours != null && slAsOf != null) {

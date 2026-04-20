@@ -21,8 +21,8 @@ configs, and eligibility rules live in `CLAUDE.md`; deferred features live in
 | AFC window boundaries | Calendar-month aligned (start on 1st, end on last day of month) | The spec says "twelve consecutive months, not necessarily by fiscal or calendar years" — alignment is unspecified. Calendar-month alignment matches how payroll periods are typically reported and keeps window edges unambiguous. Stubs whose `payEndDate` does not fall on the last day of a month do not qualify as window anchors, so a partial trailing month is excluded from consideration. |
 | Chart library | D3.js v7 (inlined) | Full axis control; SVG resolution-independent; `line.defined()` handles gaps cleanly |
 | Multiple curves | Single curve | No use case expressed for overlays at time of implementation |
-| Age penalty | 6%/yr below normal retirement age | Consistent across all plans per source PDFs |
-| Penalty granularity | Whole years (floor) | PDFs say "each year under age 62" — no monthly pro-ration; produces staircase curve |
+| Age penalty | 5%/yr (hybrid, contributory); 6%/yr (noncontributory) | Confirmed against official ERS calculator ARF lookup tables; source PDFs only documented 6% for noncontributory |
+| Penalty granularity | Whole years (floor) | Produces staircase curve; official calculator interpolates by month but whole-year approximation is close |
 | Retirement option | Maximum Allowance only | Survivor reductions require actuarial factors not in source PDFs |
 | Plan scope | All three plans (5 variants) | Minimal added complexity; maximises usefulness |
 | Mixed service | Not supported | Additive formula is known; UI and eligibility logic need more design; tracked in TODO.md |
@@ -56,5 +56,7 @@ The result is a visible staircase in the early retirement window: the pension
 jumps on each birthday as one fewer year of penalty applies, then stays flat
 until the next birthday.
 
-This is intentional and correct per the source PDFs ("6% for each year under
-age 62" — no monthly pro-ration is specified).
+The penalty rate is 5%/year for hybrid and contributory plans and 6%/year for
+noncontributory (confirmed against the official ERS calculator's ARF tables).
+No monthly pro-ration is applied; the official calculator does interpolate by
+month but the whole-year approximation is close.

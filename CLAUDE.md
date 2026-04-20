@@ -50,20 +50,20 @@ Deferred items: mixed-service (multi-plan) members, survivor benefit options (se
 **Pension formula:**
 ```js
 pension = multiplier × (serviceAtM / 12) × afcMonthly × factor
-factor  = Math.max(0, 1.0 - 0.06 * yearsEarly)
+factor  = Math.max(0, 1.0 - config.earlyPenalty * yearsEarly)
 yearsEarly = Math.max(0, normalRetirementAge - Math.floor(ageAtM))  // whole years
 ```
 
-The whole-year floor produces a **staircase curve** — penalty steps down 6% on each birthday, flat between birthdays.
+The whole-year floor produces a **staircase curve** — penalty steps down on each birthday, flat between birthdays.
 
 **Plan configs:**
 ```js
 const PLAN_CONFIGS = {
-  'hybrid-post2012':       { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120, colaRate: 0.015 },
-  'hybrid-pre2012':        { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025 },
-  'contributory-post2012': { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120, colaRate: 0.015 },
-  'contributory-pre2012':  { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025 },
-  'noncontributory':       { multiplier: 0.0125, N: 3, mode: 'total',   vestingMonths: 120, colaRate: 0.025 },
+  'hybrid-post2012':       { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120, colaRate: 0.015, earlyPenalty: 0.05 },
+  'hybrid-pre2012':        { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025, earlyPenalty: 0.05 },
+  'contributory-post2012': { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120, colaRate: 0.015, earlyPenalty: 0.05 },
+  'contributory-pre2012':  { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025, earlyPenalty: 0.05 },
+  'noncontributory':       { multiplier: 0.0125, N: 3, mode: 'total',   vestingMonths: 120, colaRate: 0.025, earlyPenalty: 0.06 },
 };
 ```
 
@@ -105,10 +105,10 @@ Each series row carries `pensionCurrentSL` (with sick leave as entered) and `pen
 
 | Plan | Normal retirement | Early retirement | Early penalty |
 |------|------------------|-----------------|---------------|
-| hybrid-post2012 | Age 65/10 yos OR Age 60/30 yos | Age 55/20 yos | 6%/yr below normal age |
-| hybrid-pre2012 | Age 62/5 yos OR Age 55/30 yos | Age 55/20 yos | 6%/yr below normal age |
-| contributory-post2012 | Age 60/10 yos | Age 55/25 yos | 6%/yr below normal age |
-| contributory-pre2012 | Age 55/5 yos | Any age/25 yos | 6%/yr below age 55 |
+| hybrid-post2012 | Age 65/10 yos OR Age 60/30 yos | Age 55/20 yos | 5%/yr below normal age |
+| hybrid-pre2012 | Age 62/5 yos OR Age 55/30 yos | Age 55/20 yos | 5%/yr below normal age |
+| contributory-post2012 | Age 60/10 yos | Age 55/25 yos | 5%/yr below normal age |
+| contributory-pre2012 | Age 55/5 yos | Any age/25 yos | 5%/yr below age 55 |
 | noncontributory | Age 62/10 yos OR Age 55/30 yos | Age 55/20–29 yos | 6%/yr below age 62 |
 
 For dual-threshold plans (hybrid-post2012, hybrid-pre2012, noncontributory), whichever normal threshold is met first ends the penalty.
