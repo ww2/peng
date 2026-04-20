@@ -1828,12 +1828,17 @@
       const pxPerYear = eligPxWidth / Math.max(1, xMax.getFullYear() - eligFromDate.getFullYear());
       const rawEvery  = Math.ceil(36 / pxPerYear);
       const labelEvery = rawEvery <= 1 ? 1 : rawEvery <= 2 ? 2 : rawEvery <= 5 ? 5 : 10;
-      // Suppress regular tick labels that would collide with xMin or a zone transition
-      const boundaryXs = [xScale(xMin), ...compressedSegs.map(s => xScale(s.to))];
+      // Suppress regular tick labels that would collide with xMin or a zone transition.
+      // xMin uses text-anchor:start so its right edge extends ~28px; regular labels are
+      // centered (~14px half-width) — need 28+14+4 = 46px clearance, so use 50.
+      const boundaryXs = [
+        { px: xScale(xMin), minGap: 50 },
+        ...compressedSegs.map(s => ({ px: xScale(s.to), minGap: 30 }))
+      ];
       const xLabelVals = xMajorVals.filter(d => {
         if (d.getFullYear() % labelEvery !== 0) return false;
         const px = xScale(d);
-        return boundaryXs.every(bx => Math.abs(px - bx) >= 30);
+        return boundaryXs.every(b => Math.abs(px - b.px) >= b.minGap);
       });
       g.append('g').selectAll('text').data(xLabelVals).join('text')
         .attr('x', d => xScale(d)).attr('y', iH + 18)
