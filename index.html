@@ -512,8 +512,64 @@
       return { year: yearDiff, month: monthDiff };
     }
 
+    // Age calculation used by the official calculator for eligibility checks.
+    // No day-rounding (unlike officialArfAge) — just carries borrows across months/years.
+    // Returns { year, month, day } where day is the residual after borrow adjustment.
+    function officialEligAge(dob, retDate) {
+      let dayDiff   = retDate.getDate()     - dob.getDate();
+      let monthDiff = retDate.getMonth()    - dob.getMonth();
+      let yearDiff  = retDate.getFullYear() - dob.getFullYear();
+      if (dayDiff < 0)   { monthDiff -= 1; dayDiff += 30; }
+      if (monthDiff < 0) { monthDiff += 12; yearDiff -= 1; }
+      return { year: yearDiff, month: monthDiff, day: dayDiff };
+    }
+
+    // Returns 'regular', 'early', or 'ineligible'.
+    // eligAge must be the result of officialEligAge(dob, retDate).
+    // svcYears is total credited service in whole years (Math.floor(svcMonths / 12)).
+    function officialEligibility(plan, eligAge, svcYears) {
+      const y   = eligAge.year;
+      const pbd = eligAge.month * 30 + eligAge.day; // days past birthday; >0 means past exact birthday
+      switch (plan) {
+        case 'noncontributory':
+          if (((y > 62 || (y === 62 && pbd > 0)) && svcYears >= 10) || (y >= 55 && svcYears >= 30))
+            return 'regular';
+          if (y >= 55 && svcYears >= 20) return 'early';
+          return 'ineligible';
+        case 'hybrid-pre2012':
+          if ((y >= 62 && svcYears >= 5) || (y >= 55 && svcYears >= 30)) return 'regular';
+          if (y >= 55 && svcYears >= 20) return 'early';
+          return 'ineligible';
+        case 'hybrid-post2012':
+          if ((y >= 65 && svcYears >= 10) || (y >= 60 && svcYears >= 30)) return 'regular';
+          if (y >= 55 && svcYears >= 20) return 'early';
+          return 'ineligible';
+        case 'contributory-pre2012':
+          if (y >= 55 && svcYears >= 5) return 'regular';
+          if (svcYears >= 25) return 'early';
+          return 'ineligible';
+        case 'contributory-post2012':
+          if (y >= 60 && svcYears >= 10) return 'regular';
+          if (y >= 55 && svcYears >= 25) return 'early';
+          return 'ineligible';
+        default: return 'ineligible';
+      }
+    }
+
+    // Returns the Age Reduction Factor from the official lookup tables.
+    // arfYear/arfMonth must come from officialArfAge().
+    function officialARF(eligibility, plan, arfYear, arfMonth) {
+      if (eligibility === 'regular')    return 1;
+      if (eligibility === 'ineligible') return 0;
+      const tier     = plan.endsWith('post2012') ? 'tier2' : 'tier1';
+      const tableKey = plan.startsWith('hybrid')        ? 'tableH'
+                     : plan === 'noncontributory'        ? 'tableNonCon'
+                     :                                    'tableCon1';
+      return OFFICIAL_ARF_TABLES[tier]?.[tableKey]?.[arfYear]?.[arfMonth] ?? 1;
+    }
+
     // Expose for console testing (module scope is not accessible otherwise).
-    window._debug = { officialArfAge, OFFICIAL_ARF_TABLES };
+    window._debug = { officialArfAge, officialEligAge, officialEligibility, officialARF, OFFICIAL_ARF_TABLES };
 
     // ── Directory picker ─────────────────────────────────────────
     let pdfFiles        = {};

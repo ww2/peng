@@ -44,38 +44,76 @@ _debug.OFFICIAL_ARF_TABLES.tier2.tableH[65]     // → undefined (normal retirem
 **Goal:** Compute whether the official calculator would call a given retirement date Regular,
 Early, or Ineligible, and what ARF it would apply.
 
-**What to add:**
+**What was added:**
 
-1. `officialEligibility(plan, ageYear, serviceYears, tier)` — port `getEligibility` from
-   `ers.utils.js` verbatim, mapping `index.html` plan names to official plan types:
-   - `hybrid-post2012`       → HYBRID / tier2
-   - `hybrid-pre2012`        → HYBRID / tier1
-   - `contributory-post2012` → CONTRIBUTORY / tier2
-   - `contributory-pre2012`  → CONTRIBUTORY / tier1
-   - `noncontributory`       → NON_CONTRIBUTORY / tier1
+- `officialEligAge(dob, retDate)` → `{year, month, day}` — eligibility age with no day-rounding
+  (the official calculator uses a separate age calculation for eligibility vs. ARF lookup).
+- `officialEligibility(plan, eligAge, svcYears)` — returns `'regular'`, `'early'`, or
+  `'ineligible'`. Takes the `eligAge` object directly. Tier is derived from the plan name.
+- `officialARF(eligibility, plan, arfYear, arfMonth)` — returns the ARF from the lookup tables.
+  Tier and table key are derived from the plan name. Returns 1 for regular, 0 for ineligible.
+- `window._debug` updated to expose all four functions.
 
-2. `officialARF(eligibility, plan, arfYear, arfMonth, tier)` — port `getARF` / table lookup:
-   - REGULAR → return 1
-   - INELIGIBLE → return 0
-   - EARLY → `OFFICIAL_TABLES[tier][tableKey][arfYear]?.[arfMonth] ?? 1`
-     where `tableKey` is `tableH` / `tableNonCon` / `tableCon1` per plan
-
-**Success criteria:** Both functions callable from the console with no errors.
-
-**Manual validation:**
+**Manual validation — run these in the Firefox console after reloading:**
 ```js
-// hybrid-post2012, DOB 1975-06-15, retirement 2033-01-01, service ~25 years
-const { officialArfAge, officialEligibility, officialARF, OFFICIAL_ARF_TABLES } = _debug;
-const arfAge = officialArfAge(new Date('1975-06-15'), new Date('2033-01-01'))
+const { officialArfAge, officialEligAge, officialEligibility, officialARF, OFFICIAL_ARF_TABLES } = _debug;
+
+// 1. Early retirement case: DOB 1975-06-15, retire 2033-01-01, 25 years service
+const arfAge  = officialArfAge(new Date('1975-06-15'), new Date('2033-01-01')); arfAge
 // → { year: 57, month: 7 }
-const elig = officialEligibility('hybrid-post2012', 57, 25, 'tier2')
-// → 'Early Retirement' (age 57 >= 55, service >= 20)
-const arf = officialARF(elig, 'hybrid-post2012', arfAge.year, arfAge.month, 'tier2')
-// → OFFICIAL_ARF_TABLES.tier2.tableH[57][7]  ≈ 0.629
+const eligAge = officialEligAge(new Date('1975-06-15'), new Date('2033-01-01')); eligAge
+// → { year: 57, month: 6, day: 17 }  (no day-rounding, so month stays at 6)
+const elig = officialEligibility('hybrid-post2012', eligAge, 25); elig
+// → 'early'  (age 57 >= 55, service 25 >= 20)
+const arf = officialARF(elig, 'hybrid-post2012', arfAge.year, arfAge.month); arf
+// → 0.629226  (OFFICIAL_ARF_TABLES.tier2.tableH[57][7])
+
+// 2. Normal retirement case: DOB 1975-06-15, retire 2040-07-01, 32 years service
+const eligAge2 = officialEligAge(new Date('1975-06-15'), new Date('2040-07-01')); eligAge2
+// → { year: 65, month: 0, day: 16 }
+const elig2 = officialEligibility('hybrid-post2012', eligAge2, 32); elig2
+// → 'regular'  (age 65 >= 65, service 32 >= 10)
+officialARF(elig2, 'hybrid-post2012', 0, 0)
+// → 1
+
+// 3. Ineligible case: DOB 1975-06-15, retire 2030-01-01, 18 years service
+const eligAge3 = officialEligAge(new Date('1975-06-15'), new Date('2030-01-01')); eligAge3
+// → { year: 54, month: 6, day: 17 }
+const elig3 = officialEligibility('hybrid-post2012', eligAge3, 18); elig3
+// → 'ineligible'  (age 54 < 55)
+officialARF(elig3, 'hybrid-post2012', 0, 0)
+// → 0
 ```
-Manually verify the returned ARF by looking up the same age/month in the tier2 `tableH` data you
-embedded. Then enter the same values into the live ERS calculator and confirm the "Maximum Allowance"
-matches `afc × serviceYears × 0.0175 × arf`.
+
+Cross-check case 1 against the live ERS calculator
+(https://ers.ehawaii.gov/resources/calculator/):
+
+| Field | Value |
+|-------|-------|
+| Your Date of Birth | 06/15/1975 |
+| Primary Beneficiary's Date of Birth | 01/01/1975 (placeholder; doesn't affect Maximum Allowance) |
+| Monthly AFC | 5000 |
+| Retirement Month/Year | January / 2033 |
+| Membership Date | August / 1 / 2012 (puts member in Tier 2 = hybrid-post2012) |
+| Plan checkbox | Hybrid Service only |
+| Hybrid Years / Months | 25 / 0 |
+
+Expected **Maximum Allowance: $1,376.00**
+
+Derivation: `floor(round(5000 × 25 × 0.0175 × 0.629226, 2))` = `floor(1376.43)` = `$1,376.00`
+
+And, to get the same result in the browser console (post reload):
+```
+const { officialArfAge, officialEligAge, officialEligibility, officialARF } = _debug;
+const dob = new Date(1975, 5, 15);   // June 15 1975, local time                                                                          
+const ret = new Date(2033, 0, 1);    // Jan 1 2033, local time
+const arfAge  = officialArfAge(dob, ret);
+const eligAge = officialEligAge(dob, ret);
+const elig    = officialEligibility('hybrid-post2012', eligAge, 25);
+const arf     = officialARF(elig, 'hybrid-post2012', arfAge.year, arfAge.month);
+Math.floor(Math.round(5000 * 25 * 0.0175 * arf * 100) / 100)
+```
+outputs "1376"
 
 ---
 
