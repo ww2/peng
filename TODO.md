@@ -1,5 +1,10 @@
 # ERS Pension Graph — Deferred Work
 
+## CAStigation
+
+Need to prevent public access to this when I deploy it -- should I put it behind CAS,
+or limit it some other way?
+
 ## Mixed service
 
 Members with service under more than one plan (e.g. Hybrid + Noncontributory)

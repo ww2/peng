@@ -1683,7 +1683,7 @@
       const W   = svg.node().clientWidth;
       const H   = svg.node().clientHeight;
 
-      const margin = { top: 24, right: 20, bottom: 90, left: 62 };
+      const margin = { top: 24, right: 20, bottom: 125, left: 62 };
       const iW = W - margin.left - margin.right;
       const iH = H - margin.top  - margin.bottom;
 
@@ -1955,11 +1955,13 @@
             { type: 'line', color: CHART.colorSLCurrent,        dash: null,  label: '+ current sick leave'                 },
             { type: 'line', color: CHART.colorSLProjected,      dash: '4,3', label: '+ projected sick leave (no usage)'    },
           ] : []),
+          { break: true },
           { type: 'line', color: CHART.colorRaises,              dash: null,  label: '+ projected raises'                  },
           ...(hasSL ? [
             { type: 'line', color: CHART.colorRaisesSLCurrent,   dash: null,  label: '+ raises + current sick leave'       },
             { type: 'line', color: CHART.colorRaisesSLProjected, dash: '4,3', label: '+ raises + projected sick leave'     },
           ] : []),
+          { break: true },
           { type: 'line', color: CHART.colorCola,          dash: '4,3', label: 'COLA projection (on hover)'                },
         ];
 
@@ -1970,6 +1972,12 @@
         const rows = [];
         let row = [], rowUsed = 0;
         entries.forEach(e => {
+          if (e.break) {
+            if (row.length) rows.push(row);
+            row = [];
+            rowUsed = 0;
+            return;
+          }
           const w = entryW(e);
           if (row.length > 0 && rowUsed + w - gap2 > iW) {
             rows.push(row);
@@ -1982,7 +1990,14 @@
         });
         if (row.length) rows.push(row);
 
-        const rowH = 18, legStartY = iH + 58;
+        // Align entries to equal-width columns across all rows
+        const nCols = rows.reduce((m, r) => Math.max(m, r.length), 0);
+        if (nCols > 1) {
+          const colW = iW / nCols;
+          rows.forEach(row => row.forEach((e, ci) => { e.x = ci * colW; }));
+        }
+
+        const rowH = 18, legStartY = iH + 65;
         const leg  = g.append('g');
         rows.forEach((rowItems, ri) => {
           const y = legStartY + ri * rowH;
