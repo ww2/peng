@@ -1074,9 +1074,19 @@
           }
         }
 
+        // Official ERS pension: no raise rate, no sick leave, month-level ARF table.
+        const svcYrs    = Math.floor(svcAtM / 12);
+        const svcMos    = svcAtM % 12;
+        const eligAge   = officialEligAge(dob, retDate);
+        const arfAge    = officialArfAge(dob, retDate);
+        const offElig   = officialEligibility(plan, eligAge, svcYrs);
+        const arf       = officialARF(offElig, plan, arfAge.year, arfAge.month);
+        const officialPension = offElig === 'ineligible' ? null
+          : Math.floor(Math.round(afcMonthly * (svcYrs + svcMos / 12) * config.multiplier * arf * 100) / 100);
+
         const status   = isNormal ? 'normal' : isEarly ? 'early' : 'ineligible';
         const isVested = svcAtM >= config.vestingMonths;
-        rows.push({ retDate, svcAtM, ageAtM, status, pension, isVested, pensionCurrentSL, pensionProjectedSL });
+        rows.push({ retDate, svcAtM, ageAtM, status, pension, isVested, pensionCurrentSL, pensionProjectedSL, officialPension });
 
         if (status === 'normal' && !firstNormalDate) firstNormalDate = retDate;
         if (firstNormalDate && retDate >= addMonths(firstNormalDate, 120)) break;
@@ -1456,6 +1466,7 @@
         slAsOf           : asOfDate,
         raiseRate,
       });
+      window._debug.lastSeries = series;
       const eligible = series.filter(d => d.pension !== null);
       statusLine.textContent = eligible.length === 0
         ? 'No eligible retirement dates found.' : '';

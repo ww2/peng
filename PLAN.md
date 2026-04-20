@@ -117,41 +117,55 @@ outputs "1376"
 
 ---
 
-## Stage 3: Add `officialPensionAtMonth(retDate)` and build the official series
+## Stage 3: Add `officialPension` to the series ✓
 
-**Goal:** Produce a series of `{date, pension}` pairs using the official formula, parallel to
-the existing blue series. No chart changes yet — validate the numbers first.
+**Completed.** `officialPension` is computed inside the `calculateSeries` loop for each row:
 
-**What to add:**
+```js
+const svcYrs  = Math.floor(svcAtM / 12);
+const svcMos  = svcAtM % 12;
+const eligAge = officialEligAge(dob, retDate);
+const arfAge  = officialArfAge(dob, retDate);
+const offElig = officialEligibility(plan, eligAge, svcYrs);
+const arf     = officialARF(offElig, plan, arfAge.year, arfAge.month);
+const officialPension = offElig === 'ineligible' ? null
+  : Math.floor(Math.round(afcMonthly * (svcYrs + svcMos / 12) * config.multiplier * arf * 100) / 100);
+```
 
-A function `officialPensionAtMonth(retDate)` that:
-1. Computes `svcAtM` using the existing `serviceAtMonth()` (same service inputs)
-2. Converts to `svcYears = svcAtM / 12` (fractional, not rounded — the official formula uses
-   `afc × (hybridYear + hybridMonth/12) × multiplier × ARF` where it passes integer years and
-   integer months; replicate that by doing `Math.floor(svcAtM/12)` for years and `svcAtM % 12`
-   for months, matching how the form inputs would be filled)
-3. Computes `ageYear` using `officialArfAge(dob, retDate).year` (for eligibility check — the
-   official uses `getEligableAgeYear` for eligibility, which has *no* day-rounding, just
-   `dayDiff < 0 → monthDiff -= 1, monthDiff < 0 → yearDiff -= 1`; add this as
-   `officialEligAge(dob, retDate)` separately)
-4. Calls `officialEligibility`, then `officialARF`
-5. Returns `null` if INELIGIBLE; otherwise:
-   `Math.floor(afc × (svcYears + svcMonths/12) × multiplier × arf)`
-   where `multiplier` comes from the existing `PLAN_CONFIGS`
+`officialPension` is included in each `rows.push(...)` object. After `runCalculate`, the full
+series is exposed as `window._debug.lastSeries`.
 
-Then build `officialSeries` the same way `pensionSeries` is built (iterating over the same
-month range), and `console.log` a few spot values.
+**Manual validation:**
 
-**Success criteria:** `officialSeries` exists in the console with reasonable values.
+Use DOB 06/15/1975, AFC $5,000, plan `hybrid-post2012`, 25 yrs service as of 2024-01-01.
+After clicking Calculate, run in the Firefox console:
 
-**Manual validation (most important step):**
-Pick 3–5 retirement dates spanning the early-retirement range and normal range. For each:
-1. Read `officialSeries.find(d => d.date matches)` from the console
-2. Enter the same DOB, AFC, service, and retirement date into the live ERS calculator
-3. Compare the "Maximum Allowance" shown there to your `officialSeries` value
-They should match exactly (or within $1 due to `Math.floor`).
+```js
+// 1. Pick a row and read its service months — then cross-check against live calculator
+const row = _debug.lastSeries.find(d => d.retDate.getFullYear() === 2033 && d.retDate.getMonth() === 0);
+[row.svcAtM, row.officialPension]
+// → [408, 1871]
+// Service at Jan 2033 = 25 yrs + 108 months (Jan 2024 → Jan 2033) = 408 months = 34 yrs.
+// Live ERS: DOB 06/15/1975, AFC $5,000, retirement Jan/2033, Hybrid 34/0 → $1,871 ✓
 
-If they don't match, this stage is where you debug before touching the chart.
+// 2. Find the first early-eligible row and cross-check it
+const early = _debug.lastSeries.find(d => d.status === 'early');
+[early.retDate.toISOString().slice(0,7), Math.floor(early.svcAtM/12), early.svcAtM%12, early.officialPension]
+// Enter those service yrs/mos into live calculator for that retirement month
+
+// 3. Find a normal retirement row; officialPension should be close to pension (both ARF=1)
+const normal = _debug.lastSeries.find(d => d.status === 'normal');
+[normal.retDate.toISOString().slice(0,7), normal.pension, normal.officialPension]
+// Both values should be within a few dollars (smooth vs staircase disappears at normal age)
+
+// 4. Confirm ineligible rows have officialPension === null
+_debug.lastSeries.filter(d => d.status === 'ineligible').every(d => d.officialPension === null)
+// → true
+```
+
+Key insight: `officialPension` at each row uses the accrued service at that retirement date,
+**not** the entered service. Always read `row.svcAtM` first, then enter that amount in the
+live calculator to compare.
 
 ---
 
