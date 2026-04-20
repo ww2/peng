@@ -27,6 +27,12 @@
 
     fieldset[disabled] { opacity: 0.5; pointer-events: none; }
 
+    fieldset fieldset {
+      border-color: #ddd;
+      padding: 0.5rem 0.75rem 0.75rem;
+      margin-bottom: 0;
+    }
+
     legend {
       font-size: 0.8rem;
       color: #555;
@@ -237,28 +243,29 @@
         </select>
       </div>
 
-      <div class="field">
+      <div class="field" style="grid-column: 1;">
         <label for="dob">Date of birth</label>
         <input type="date" id="dob">
       </div>
 
-      <div style="grid-column: 1 / -1;">
-        <div class="svc-grid">
-          <span class="svc-hdr" style="grid-column: 1 / 4;">Credited service</span>
-          <label for="last-day" class="svc-hdr">Last day of service</label>
-
+      <fieldset style="grid-column: 1 / -1;">
+        <legend>Credited service</legend>
+        <div class="sl-grid">
           <label for="svc-years">years</label>
           <label for="svc-months">months</label>
           <label for="svc-as-of" id="svc-as-of-label">as of</label>
-          <label for="last-day" style="color:#888;">(blank = still active)</label>
 
           <input type="number" id="svc-years" min="0" max="50" step="1" placeholder="0" style="width: 6.5ch">
           <input type="number" id="svc-months" min="0" max="11" step="1" placeholder="0" style="width: 5.5ch">
           <div id="svc-as-of-field"><input type="date" id="svc-as-of"></div>
-          <div class="input-row">
-            <input type="date" id="last-day">
-            <button type="button" id="last-day-clear" title="Clear">✕</button>
-          </div>
+        </div>
+      </fieldset>
+
+      <div class="field">
+        <label for="last-day">Last day of service <span style="color:#888; font-weight:normal;">(blank = still active)</span></label>
+        <div class="input-row">
+          <input type="date" id="last-day">
+          <button type="button" id="last-day-clear" title="Clear">✕</button>
         </div>
       </div>
 
@@ -270,10 +277,9 @@
     <legend>Optional adjustments</legend>
     <div class="field-grid">
 
-      <div style="grid-column: 1 / -1;">
+      <fieldset style="grid-column: 1 / -1;">
+        <legend>Sick leave</legend>
         <div class="sl-grid">
-          <span class="svc-hdr" style="grid-column: 1 / -1;">Sick leave</span>
-
           <label for="sl-hours">Unused hours</label>
           <label for="sl-as-of">as of</label>
           <label for="sl-rate">accrual (hours/month)</label>
@@ -282,7 +288,7 @@
           <input type="date" id="sl-as-of">
           <input type="number" id="sl-rate" min="0" step="0.5" value="14" class="no-spin" style="width:5ch">
         </div>
-      </div>
+      </fieldset>
 
       <div class="field">
         <label for="raise-rate">Annual pay raise (%)</label>
