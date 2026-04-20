@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ERS Pension Graph</title>
+  <title>Estimated Pension Graph</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
 
@@ -204,7 +204,7 @@
   </style>
 </head>
 <body>
-  <h1>ERS Pension Graph</h1>
+  <h1>Estimated Pension Graph</h1>
   <p id="reload-bar"><a id="reload-link" href="#">Reload</a></p>
 
   <!-- ── Group 1: Your information ───────────────────────────── -->
@@ -339,7 +339,6 @@
       colorAxis      : '#555',
       colorLabel     : '#333',
       colorMinor     : '#bbb',
-      colorLine      : '#cc0000',
       colorSLCurrent : '#1a8c4e',
       colorSLProjected: '#72b572',
       colorOfficial  : '#0000cc',
@@ -388,7 +387,7 @@
       'noncontributory':       { multiplier: 0.0125, N: 3, mode: 'total',   vestingMonths: 120, colaRate: 0.025, earlyPenalty: 0.06 },
     };
 
-    // ── Official ERS ARF tables ───────────────────────────────────
+    // ── ARF tables ───────────────────────────────────
     // Copied verbatim from ers.data.js (tier1) and ers.dataNew.js (tier2).
     // Each table is keyed by [ageYear][monthIndex 0–11].
     // A missing key falls back to ARF = 1 (normal retirement, no penalty).
@@ -1049,32 +1048,10 @@
             normalRetAge = svcAtM >= 360 ? 55 : 62;
         }
 
-        let pension = null;
         let pensionCurrentSL = null;
         let pensionProjectedSL = null;
-        if (isNormal || isEarly) {
-          const yearsAhead   = Math.max(0, monthsBetween(asOfDate, retDate)) / 12;
-          const effectiveAfc = raiseRate > 0
-            ? afcMonthly * Math.pow(1 + raiseRate, yearsAhead)
-            : afcMonthly;
-          const yearsEarly = isNormal ? 0 : Math.max(0, normalRetAge - Math.floor(ageAtM));
-          const factor     = Math.max(0, 1 - config.earlyPenalty * yearsEarly);
-          pension = config.multiplier * (svcAtM / 12) * effectiveAfc * factor;
 
-          if (slHours != null && slAsOf != null) {
-            const accrualEnd   = lastDayOfSvc
-              ? new Date(Math.min(lastDayOfSvc.getTime(), retDate.getTime()))
-              : retDate;
-            const currentMo    = sickLeaveToMonths(slHours);
-            const projectedMo  = sickLeaveToMonths(
-              slHours + slRate * Math.max(0, monthsBetween(slAsOf, accrualEnd))
-            );
-            pensionCurrentSL   = config.multiplier * ((svcAtM + currentMo)   / 12) * effectiveAfc * factor;
-            pensionProjectedSL = config.multiplier * ((svcAtM + projectedMo) / 12) * effectiveAfc * factor;
-          }
-        }
-
-        // Official ERS pension: no raise rate, no sick leave, month-level ARF table.
+        // estimated pension: no raise rate, no sick leave, month-level ARF table.
         const svcYrs    = Math.floor(svcAtM / 12);
         const svcMos    = svcAtM % 12;
         const eligAge   = officialEligAge(dob, retDate);
@@ -1084,9 +1061,23 @@
         const officialPension = offElig === 'ineligible' ? null
           : Math.floor(Math.round(afcMonthly * (svcYrs + svcMos / 12) * config.multiplier * arf * 100) / 100);
 
+        if (slHours != null && slAsOf != null && offElig !== 'ineligible') {
+          const accrualEnd   = lastDayOfSvc
+            ? new Date(Math.min(lastDayOfSvc.getTime(), retDate.getTime()))
+            : retDate;
+          const currentMo    = sickLeaveToMonths(slHours);
+          const projectedMo  = sickLeaveToMonths(
+            slHours + slRate * Math.max(0, monthsBetween(slAsOf, accrualEnd))
+          );
+          const calcOfficial = svc =>
+            Math.floor(Math.round(afcMonthly * (svc / 12) * config.multiplier * arf * 100) / 100);
+          pensionCurrentSL   = calcOfficial(svcAtM + currentMo);
+          pensionProjectedSL = calcOfficial(svcAtM + projectedMo);
+        }
+
         const status   = isNormal ? 'normal' : isEarly ? 'early' : 'ineligible';
         const isVested = svcAtM >= config.vestingMonths;
-        rows.push({ retDate, svcAtM, ageAtM, status, pension, isVested, pensionCurrentSL, pensionProjectedSL, officialPension });
+        rows.push({ retDate, svcAtM, ageAtM, status, isVested, pensionCurrentSL, pensionProjectedSL, officialPension });
 
         if (status === 'normal' && !firstNormalDate) firstNormalDate = retDate;
         if (firstNormalDate && retDate >= addMonths(firstNormalDate, 120)) break;
@@ -1472,7 +1463,7 @@
         raiseRate,
       });
       window._debug.lastSeries = series;
-      const eligible = series.filter(d => d.pension !== null);
+      const eligible = series.filter(d => d.officialPension !== null);
       statusLine.textContent = eligible.length === 0
         ? 'No eligible retirement dates found.' : '';
       const hasSL = !(isNaN(slHours) || slHours <= 0) && slAsOf !== null;
@@ -1653,15 +1644,15 @@
       const xMin = series ? series[0].retDate                 : fallbackXMin;
       const xMax = series ? series[series.length - 1].retDate : fallbackXMax;
 
-      const eligible = series ? series.filter(d => d.pension !== null) : [];
+      const eligible = series ? series.filter(d => d.officialPension !== null) : [];
       const yMin = eligible.length
         ? Math.floor(Math.min(...eligible.flatMap(d =>
-            [d.pension, d.officialPension].filter(v => v != null)
+            [d.officialPension].filter(v => v != null)
           )) / 1000) * 1000
         : 0;
       const yMax = eligible.length
         ? Math.ceil(Math.max(...eligible.flatMap(d =>
-            [d.pension, d.pensionCurrentSL, d.pensionProjectedSL, d.officialPension].filter(v => v != null)
+            [d.pensionCurrentSL, d.pensionProjectedSL, d.officialPension].filter(v => v != null)
           )) / 1000) * 1000
         : 5000;
 
@@ -1669,7 +1660,7 @@
       const compressedSegs = [];
       if (series && series.length) {
         const fv = series.find(d => d.isVested);
-        const fe = series.find(d => d.pension !== null);
+        const fe = series.find(d => d.officialPension !== null);
         const firstVestedDate   = fv ? fv.retDate : null;
         const firstEligibleDate = fe ? fe.retDate : null;
         if (firstVestedDate && firstVestedDate > xMin)
@@ -1726,7 +1717,7 @@
       // ── Ineligible region shading ───────────────────────────────
       if (series && series.length) {
         const firstVested   = series.find(d => d.isVested);
-        const firstEligible = series.find(d => d.pension !== null);
+        const firstEligible = series.find(d => d.officialPension !== null);
         const vestedX   = firstVested   ? xScale(firstVested.retDate)   : iW;
         const eligibleX = firstEligible ? xScale(firstEligible.retDate) : iW;
 
@@ -1866,7 +1857,6 @@
 
         makeCurve(d => d.pensionProjectedSL, CHART.colorSLProjected, '4,3');
         makeCurve(d => d.pensionCurrentSL,   CHART.colorSLCurrent);
-        makeCurve(d => d.pension,            CHART.colorLine);
         makeCurve(d => d.officialPension,    CHART.colorOfficial);
       }
 
@@ -1894,12 +1884,11 @@
       // ── Legend (left-justified rows below x-axis label) ─────────
       if (series && eligible.length) {
         const hasNotVested     = series.some(d => !d.isVested);
-        const hasVestedNotElig = series.some(d => d.isVested && d.pension === null);
+        const hasVestedNotElig = series.some(d => d.isVested && d.officialPension === null);
         const entries = [
           ...(hasNotVested     ? [{ type: 'rect', fill: CHART.colorNotVested,   label: 'Not yet vested'                      }] : []),
           ...(hasVestedNotElig ? [{ type: 'rect', fill: CHART.colorIneligible,  label: 'Vested, not yet eligible'            }] : []),
-          { type: 'line', color: CHART.colorLine,          dash: null,  label: 'ERS formulas from PDFs'                      },
-          { type: 'line', color: CHART.colorOfficial,      dash: null,  label: 'ERS online calculator'                               },
+          { type: 'line', color: CHART.colorOfficial,      dash: null,  label: 'estimated pension'                                   },
           ...(hasSL ? [
             { type: 'line', color: CHART.colorSLCurrent,   dash: null,  label: '+ current sick leave'                      },
             { type: 'line', color: CHART.colorSLProjected, dash: '4,3', label: '+ projected sick leave (no usage)'         },
@@ -1971,7 +1960,7 @@
         .attr('text-anchor', 'middle')
         .attr('font-family', CHART.font).attr('font-size', '0.85rem').attr('font-weight', 'bold')
         .attr('fill', CHART.colorTitle)
-        .text('ERS Monthly Pension vs. Retirement Date');
+        .text('Estimated Monthly Pension vs. Retirement Date');
 
       // ── Tooltip ──────────────────────────────────────────────────
       if (eligible.length) {
@@ -1990,16 +1979,13 @@
           .attr('stroke', CHART.colorCrosshair).attr('stroke-width', 1).attr('stroke-dasharray', '4,3');
 
         tip.append('circle').attr('class', 'tip-dot')
-          .attr('r', 3.5).attr('fill', CHART.colorLine);
+          .attr('r', 3.5).attr('fill', CHART.colorOfficial);
 
         tip.append('circle').attr('class', 'tip-dot-sl-current')
           .attr('r', 3.5).attr('fill', CHART.colorSLCurrent).attr('display', 'none');
 
         tip.append('circle').attr('class', 'tip-dot-sl-projected')
           .attr('r', 3.5).attr('fill', CHART.colorSLProjected).attr('display', 'none');
-
-        tip.append('circle').attr('class', 'tip-dot-official')
-          .attr('r', 3.5).attr('fill', CHART.colorOfficial).attr('display', 'none');
 
         const colaPath = tip.append('g').attr('clip-path', 'url(#plot-clip)')
           .append('path')
@@ -2033,29 +2019,22 @@
             const px = xScale(pt.retDate);
 
             // All dots — shown on every active curve for context
-            const hasSL       = pt.pensionCurrentSL != null;
-            const hasOfficial = pt.officialPension  != null;
+            const hasSL = pt.pensionCurrentSL != null;
             tip.select('.tip-dot')
-              .attr('cx', px).attr('cy', yScale(pt.pension));
+              .attr('cx', px).attr('cy', yScale(pt.officialPension));
             tip.select('.tip-dot-sl-current')
               .attr('cx', px).attr('cy', hasSL ? yScale(pt.pensionCurrentSL)  : 0)
               .attr('display', hasSL ? null : 'none');
             tip.select('.tip-dot-sl-projected')
               .attr('cx', px).attr('cy', hasSL ? yScale(pt.pensionProjectedSL) : 0)
               .attr('display', hasSL ? null : 'none');
-            tip.select('.tip-dot-official')
-              .attr('cx', px).attr('cy', hasOfficial ? yScale(pt.officialPension) : 0)
-              .attr('display', hasOfficial ? null : 'none');
 
             // Pick the curve closest to the cursor's Y position
             const candidates = [
-              { pension: pt.pension,            label: '',              color: CHART.colorTitle       },
+              { pension: pt.officialPension,    label: '',              color: CHART.colorOfficial    },
               ...(hasSL ? [
                 { pension: pt.pensionCurrentSL,   label: ' (+ cur. SL)',  color: CHART.colorSLCurrent   },
                 { pension: pt.pensionProjectedSL, label: ' (+ proj. SL)', color: CHART.colorSLProjected },
-              ] : []),
-              ...(hasOfficial ? [
-                { pension: pt.officialPension,    label: ' (official)',   color: CHART.colorOfficial    },
               ] : []),
             ];
             const closest = candidates.reduce((best, c) =>
