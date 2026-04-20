@@ -1842,6 +1842,19 @@
         .attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', iH)
         .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
 
+      // ── Break indicators — one zigzag centred in each compressed zone ──
+      compressedSegs.forEach((_, i) => {
+        const bx = i * COMPRESS_PX + COMPRESS_PX / 2, h = 6, w = 4;
+        g.append('line')
+          .attr('x1', bx - w).attr('x2', bx + 2 * w)
+          .attr('y1', iH).attr('y2', iH)
+          .attr('stroke', '#fff').attr('stroke-width', 3);
+        g.append('polyline')
+          .attr('points', `${bx - w},${iH + h/2} ${bx},${iH - h/2} ${bx + w},${iH + h/2} ${bx + 2*w},${iH - h/2}`)
+          .attr('fill', 'none')
+          .attr('stroke', CHART.colorAxis).attr('stroke-width', 1.5);
+      });
+
       // ── Legend (left-justified rows below x-axis label) ─────────
       if (series && eligible.length) {
         const hasNotVested     = series.some(d => !d.isVested);
