@@ -14,43 +14,28 @@ The tables themselves are small enough to embed directly.
 
 ---
 
-## Stage 1: Embed the official ARF tables and age-rounding function
+## Stage 1: Embed the official ARF tables and age-rounding function ✓
 
-**Goal:** Get the raw data and the key age calculation into `index.html` with no UI changes.
+**Completed.** Added to `index.html` immediately after `PLAN_CONFIGS`:
 
-**What to add** (inside a `<script>` block, above the existing JS):
+- `OFFICIAL_ARF_TABLES` constant with `tier1`/`tier2` sub-objects each containing the relevant
+  table(s): `tableH` (hybrid), `tableNonCon` (noncontributory, tier1 only), `tableCon1`
+  (contributory). Copied verbatim from `ers/_js/scripts/ers.data.js` and `ers.dataNew.js`.
+- `officialArfAge(dob, retDate)` → `{year, month}` using the official rounding (days ≥ 15
+  rounds up to the next month; month overflow carries into year).
+- `window._debug = { officialArfAge, OFFICIAL_ARF_TABLES }` to expose both for console testing
+  (required because the script uses `type="module"`, which has its own scope).
 
-1. A `OFFICIAL_TABLES` constant containing:
-   - `tier1.tableH` — hybrid tier1 (pre-2012) ARF by [year 55–62][month 0–11]
-   - `tier2.tableH` — hybrid tier2 (post-2012) ARF by [year 55–64][month 0–11]
-   - `tier1.tableNonCon` — noncontributory ARF by [year 55–61][month 0–11]
-   - `tier1.tableCon1` — contributory tier1 ARF by [year 28–54][month 0–11]
-   - `tier2.tableCon1` — contributory tier2 ARF by [year 28–59][month 0–11]
-   (Copy these verbatim from `ers/_js/scripts/ers.data.js` and `ers.dataNew.js`.)
-
-2. A function `officialArfAge(dob, retDate)` → `{year, month}` using the official rounding:
-   ```
-   dayDiff  = retDate.day - dob.day
-   monthDiff = retDate.month - dob.month
-   yearDiff  = retDate.year - dob.year
-   if dayDiff < 0:  monthDiff -= 1; dayDiff += 30
-   if monthDiff < 0: monthDiff += 12; yearDiff -= 1
-   if dayDiff >= 15: monthDiff += 1
-   if monthDiff >= 12: yearDiff += 1   // no reset of monthDiff — year increments, month stays for lookup
-   return {year: yearDiff, month: monthDiff % 12}
-   ```
-
-**Success criteria:** `officialArfAge` is available in the browser console.
-
-**Manual validation:**
-Open `index.html` in a browser, open the console, and run:
+**Validated in Firefox console:**
 ```js
-// Example: DOB 1975-06-15, retirement 2033-01-01
-officialArfAge(new Date('1975-06-15'), new Date('2033-01-01'))
-// Expected: {year: 57, month: 6}  (57 years, 6 months + 17 days → rounds up to month 7)
-// Cross-check: 2033-01 minus 1975-06 = 57y 7m minus 15d → dayDiff=1-15=-14<0 → monthDiff-=1→6, dayDiff+=30=16 → 16>=15 → monthDiff+1=7 → {year:57, month:7}
+_debug.officialArfAge(new Date('1975-06-15'), new Date('2033-01-01'))
+// → { year: 57, month: 7 }
+// Trace: dayDiff=1-15=-14 → monthDiff-=1, dayDiff+=30=16 → monthDiff=-6+12=6,
+//        yearDiff=58-1=57 → dayDiff 16>=15 → monthDiff=7 → { year:57, month:7 }
+
+_debug.OFFICIAL_ARF_TABLES.tier2.tableH[57][6]  // → 0.62506
+_debug.OFFICIAL_ARF_TABLES.tier2.tableH[65]     // → undefined (normal retirement; ARF=1)
 ```
-Try a few DOB/retirement combos and verify the year/month make sense.
 
 ---
 
@@ -79,14 +64,14 @@ Early, or Ineligible, and what ARF it would apply.
 
 **Manual validation:**
 ```js
-// hybrid-post2012, DOB 1975-06-15, retirement 2033-01-01
-// Service at that date: say 25 years
+// hybrid-post2012, DOB 1975-06-15, retirement 2033-01-01, service ~25 years
+const { officialArfAge, officialEligibility, officialARF, OFFICIAL_ARF_TABLES } = _debug;
 const arfAge = officialArfAge(new Date('1975-06-15'), new Date('2033-01-01'))
-// arfAge.year = 57
+// → { year: 57, month: 7 }
 const elig = officialEligibility('hybrid-post2012', 57, 25, 'tier2')
-// Expected: 'Early Retirement' (age 57 >= 55, service >= 20)
+// → 'Early Retirement' (age 57 >= 55, service >= 20)
 const arf = officialARF(elig, 'hybrid-post2012', arfAge.year, arfAge.month, 'tier2')
-// Expected: OFFICIAL_TABLES.tier2.tableH[57][arfAge.month]  ≈ 0.625–0.646
+// → OFFICIAL_ARF_TABLES.tier2.tableH[57][7]  ≈ 0.629
 ```
 Manually verify the returned ARF by looking up the same age/month in the tier2 `tableH` data you
 embedded. Then enter the same values into the live ERS calculator and confirm the "Maximum Allowance"
