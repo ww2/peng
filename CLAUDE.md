@@ -42,19 +42,32 @@ All major features are complete:
 - Annual raise rate applied to AFC
 - COLA projection on hover
 - Hover tooltip with crosshair
+- Official ERS comparison line (red): ARF lookup tables ported from official calculator source, drawn alongside the blue curve for direct comparison
 
 Deferred items: mixed-service (multi-plan) members, survivor benefit options (see `TODO.md`).
 
 ## Key Logic
 
-**Pension formula:**
+**Pension formula (blue curve):**
 ```js
-pension = multiplier × (serviceAtM / 12) × afcMonthly × factor
-factor  = Math.max(0, 1.0 - config.earlyPenalty * yearsEarly)
-yearsEarly = Math.max(0, normalRetirementAge - Math.floor(ageAtM))  // whole years
+pension    = multiplier × (svcAtM / 12) × effectiveAfc × factor
+factor     = Math.max(0, 1 - config.earlyPenalty * yearsEarly)
+yearsEarly = isNormal ? 0 : Math.max(0, normalRetAge - Math.floor(ageAtM))
 ```
+`normalRetAge` is always the **primary** normal retirement age (e.g., 65 for hybrid-post2012). The lower alternative threshold (e.g., 60/30) sets `isNormal = true`, which zeroes `yearsEarly` directly rather than lowering the reference age. See `info/DESIGN.md` for rationale.
 
-The whole-year floor produces a **staircase curve** — penalty steps down on each birthday, flat between birthdays.
+The whole-year floor produces a **staircase curve**; see `info/DESIGN.md` for details.
+
+**Official pension formula (red curve):**
+```js
+const arfAge  = officialArfAge(dob, retDate);   // {year, month} — days≥15 rounds up
+const eligAge = officialEligAge(dob, retDate);  // {year, month, day} — no rounding
+const elig    = officialEligibility(plan, eligAge, Math.floor(svcAtM / 12));
+const arf     = officialARF(elig, plan, arfAge.year, arfAge.month);
+officialPension = elig === 'ineligible' ? null
+  : Math.floor(Math.round(afcMonthly × (svcYrs + svcMos/12) × multiplier × arf × 100) / 100);
+```
+ARF values come from `OFFICIAL_ARF_TABLES` (ported from `ers/_js/scripts/ers.data.js` and `ers.dataNew.js`). The red curve uses current AFC with no sick leave or raise adjustment. `window._debug.lastSeries` exposes the series in the browser console after Calculate.
 
 **Plan configs:**
 ```js
@@ -111,23 +124,27 @@ Each series row carries `pensionCurrentSL` (with sick leave as entered) and `pen
 | contributory-pre2012 | Age 55/5 yos | Any age/25 yos | 5%/yr below age 55 |
 | noncontributory | Age 62/10 yos OR Age 55/30 yos | Age 55/20–29 yos | 6%/yr below age 62 |
 
-For dual-threshold plans (hybrid-post2012, hybrid-pre2012, noncontributory), whichever normal threshold is met first ends the penalty.
+For dual-threshold plans (hybrid-post2012, hybrid-pre2012, noncontributory), whichever normal threshold is met first ends the penalty. The penalty basis is always the primary normal age, not the lower alternative — see `info/DESIGN.md`.
 
 ## Chart Specification
 
 - **X axis** (horizontal): Retirement date, time scale; major ticks Jan 1/year (grid line), minor every 2 months (odd months)
-- **Y axis** (vertical): Monthly pension $, linear scale, $0 → max rounded to nearest $1,000; major ticks every $1,000, minor every $100
+- **Y axis** (vertical): Monthly pension $, linear scale; major ticks every $1,000, minor every $100
 - **X range**: next month → (earliest normal retirement date + 10 years)
-- **Y minimum**: floor of minimum eligible pension, rounded to nearest $1,000 (not always $0)
+- **Y range**: floor of minimum across all active curves → ceil of maximum across all active curves, each rounded to nearest $1,000
 - **Lines** (all use `line.defined` — gaps where pension is null):
-  - Blue solid: base pension
+  - Blue solid: base pension (this calculator)
   - Green solid: base + current sick leave months
   - Light-green dashed: base + projected sick leave (no usage through retirement)
+  - Red solid: official ERS calculator value (current AFC, no sick leave, no raise)
+- **Legend**: box in top-right corner of plot area; entries for all active curves
 - **Shaded regions** (left of eligible date):
   - Dark grey (`#e8e8e8`): not yet vested
   - Light grey (`#f5f5f5`): vested, not yet eligible to collect
-- **Hover tooltip**: vertical + horizontal crosshair; dots on all active curves; label snaps to the curve closest to cursor Y; COLA projection curve (dashed orange) extends 20 years from the hovered point. Label format: `"May 2031 — $2,847/mo"` (or `"$2,847/mo (+ cur. SL)"` / `"(+ proj. SL)"` when SL curves are active).
+- **Hover tooltip**: vertical + horizontal crosshair; dots on all active curves; label snaps to the curve closest to cursor Y; COLA projection curve (dashed orange) extends 20 years from the hovered point. Label format: `"May 2031 — $2,847/mo"` (or `"(+ cur. SL)"` / `"(+ proj. SL)"` / `"(official)"` suffix when applicable).
 
 ## Reference Documents
 
-PDF specs in `info/` cover the legal definitions of multipliers, eligibility thresholds, and AFC rules for each plan variant.
+- `info/DESIGN.md` — design decisions and rationale (staircase curve, penalty reference age, official line architecture, AFC field UX, etc.)
+- PDF specs in `info/` — legal definitions of multipliers, eligibility thresholds, and AFC rules for each plan variant
+- `ers/` — downloaded official ERS calculator source; `ers/_js/scripts/ers.data.js` and `ers.dataNew.js` are the source of the embedded ARF tables

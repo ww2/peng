@@ -345,6 +345,7 @@
       colorLine      : '#0066cc',
       colorSLCurrent : '#1a8c4e',
       colorSLProjected: '#72b572',
+      colorOfficial  : '#cc0000',
       colorCola      : '#cc6600',
       colorTitle     : '#222',
       colorCrosshair : '#aaa',
@@ -1022,7 +1023,7 @@
             // Normal: 65/10 yos OR 60/30 yos.  Early: 55/20 yos.
             isNormal     = (ageAtM >= 65 && svcAtM >= 120) || (ageAtM >= 60 && svcAtM >= 360);
             isEarly      = !isNormal && ageAtM >= 55 && svcAtM >= 240;
-            normalRetAge = svcAtM >= 360 ? 60 : 65;
+            normalRetAge = 65;  // penalty always relative to 65; 60/30 only ends the penalty at 60
             break;
           case 'hybrid-pre2012':
             // Normal: 62/5 yos OR 55/30 yos.  Early: 55/20 yos.
@@ -1057,7 +1058,7 @@
           const effectiveAfc = raiseRate > 0
             ? afcMonthly * Math.pow(1 + raiseRate, yearsAhead)
             : afcMonthly;
-          const yearsEarly = Math.max(0, normalRetAge - Math.floor(ageAtM));
+          const yearsEarly = isNormal ? 0 : Math.max(0, normalRetAge - Math.floor(ageAtM));
           const factor     = Math.max(0, 1 - config.earlyPenalty * yearsEarly);
           pension = config.multiplier * (svcAtM / 12) * effectiveAfc * factor;
 
@@ -1644,11 +1645,13 @@
 
       const eligible = series ? series.filter(d => d.pension !== null) : [];
       const yMin = eligible.length
-        ? Math.floor(Math.min(...eligible.map(d => d.pension)) / 1000) * 1000
+        ? Math.floor(Math.min(...eligible.flatMap(d =>
+            [d.pension, d.officialPension].filter(v => v != null)
+          )) / 1000) * 1000
         : 0;
       const yMax = eligible.length
         ? Math.ceil(Math.max(...eligible.flatMap(d =>
-            [d.pension, d.pensionCurrentSL, d.pensionProjectedSL].filter(v => v != null)
+            [d.pension, d.pensionCurrentSL, d.pensionProjectedSL, d.officialPension].filter(v => v != null)
           )) / 1000) * 1000
         : 5000;
 
@@ -1776,6 +1779,7 @@
         makeCurve(d => d.pensionProjectedSL, CHART.colorSLProjected, '4,3');
         makeCurve(d => d.pensionCurrentSL,   CHART.colorSLCurrent);
         makeCurve(d => d.pension,            CHART.colorLine);
+        makeCurve(d => d.officialPension,    CHART.colorOfficial);
       }
 
       // ── Axis baselines ──────────────────────────────────────────
@@ -1785,6 +1789,37 @@
       g.append('line')
         .attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', iH)
         .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
+
+      // ── Legend ──────────────────────────────────────────────────
+      if (series && eligible.length) {
+        const hasSLData = eligible.some(d => d.pensionCurrentSL != null);
+        const legendEntries = [
+          { color: CHART.colorLine,         dash: null,  label: 'This calculator' },
+          { color: CHART.colorOfficial,     dash: null,  label: 'Official ERS'    },
+          ...(hasSLData ? [
+            { color: CHART.colorSLCurrent,  dash: null,  label: '+ current SL'   },
+            { color: CHART.colorSLProjected,dash: '4,3', label: '+ projected SL' },
+          ] : []),
+        ];
+        const rowH = 18, legW = 132, pad = 8;
+        const legH = legendEntries.length * rowH + pad;
+        const leg  = g.append('g').attr('transform', `translate(${iW - legW - 4},4)`);
+        leg.append('rect')
+          .attr('width', legW).attr('height', legH)
+          .attr('fill', 'white').attr('stroke', CHART.colorMinor).attr('rx', 3).attr('opacity', 0.9);
+        legendEntries.forEach((e, i) => {
+          const y = pad + i * rowH;
+          const ln = leg.append('line')
+            .attr('x1', pad).attr('x2', pad + 20).attr('y1', y).attr('y2', y)
+            .attr('stroke', e.color).attr('stroke-width', 1.5);
+          if (e.dash) ln.attr('stroke-dasharray', e.dash);
+          leg.append('text')
+            .attr('x', pad + 26).attr('y', y)
+            .attr('dominant-baseline', 'middle')
+            .attr('font-family', CHART.font).attr('font-size', '0.7rem').attr('fill', CHART.colorLabel)
+            .text(e.label);
+        });
+      }
 
       // ── Axis labels ─────────────────────────────────────────────
       g.append('text')
@@ -1832,6 +1867,9 @@
         tip.append('circle').attr('class', 'tip-dot-sl-projected')
           .attr('r', 3.5).attr('fill', CHART.colorSLProjected).attr('display', 'none');
 
+        tip.append('circle').attr('class', 'tip-dot-official')
+          .attr('r', 3.5).attr('fill', CHART.colorOfficial).attr('display', 'none');
+
         const colaPath = tip.append('g').attr('clip-path', 'url(#plot-clip)')
           .append('path')
           .attr('fill', 'none')
@@ -1864,7 +1902,8 @@
             const px = xScale(pt.retDate);
 
             // All dots — shown on every active curve for context
-            const hasSL = pt.pensionCurrentSL != null;
+            const hasSL       = pt.pensionCurrentSL != null;
+            const hasOfficial = pt.officialPension  != null;
             tip.select('.tip-dot')
               .attr('cx', px).attr('cy', yScale(pt.pension));
             tip.select('.tip-dot-sl-current')
@@ -1873,13 +1912,19 @@
             tip.select('.tip-dot-sl-projected')
               .attr('cx', px).attr('cy', hasSL ? yScale(pt.pensionProjectedSL) : 0)
               .attr('display', hasSL ? null : 'none');
+            tip.select('.tip-dot-official')
+              .attr('cx', px).attr('cy', hasOfficial ? yScale(pt.officialPension) : 0)
+              .attr('display', hasOfficial ? null : 'none');
 
             // Pick the curve closest to the cursor's Y position
             const candidates = [
-              { pension: pt.pension,            label: '',           color: CHART.colorTitle },
+              { pension: pt.pension,            label: '',              color: CHART.colorTitle       },
               ...(hasSL ? [
                 { pension: pt.pensionCurrentSL,   label: ' (+ cur. SL)',  color: CHART.colorSLCurrent   },
                 { pension: pt.pensionProjectedSL, label: ' (+ proj. SL)', color: CHART.colorSLProjected },
+              ] : []),
+              ...(hasOfficial ? [
+                { pension: pt.officialPension,    label: ' (official)',   color: CHART.colorOfficial    },
               ] : []),
             ];
             const closest = candidates.reduce((best, c) =>
