@@ -1609,6 +1609,7 @@
         .attr('transform', `translate(${margin.left},${margin.top})`);
 
       // ── Scales ─────────────────────────────────────────────────
+      const COMPRESS_PX = 56;
       const today = new Date();
       const fallbackXMin = new Date(today.getFullYear(), today.getMonth() + 1, 1);
       const fallbackXMax = new Date(today.getFullYear() + 15, today.getMonth() + 1, 1);
@@ -1628,17 +1629,59 @@
           )) / 1000) * 1000
         : 5000;
 
-      const xScale = d3.scaleTime().domain([xMin, xMax]).range([0, iW]);
+      // Build compressed segments for ineligible zones (not-vested, vested-but-ineligible)
+      const compressedSegs = [];
+      if (series && series.length) {
+        const fv = series.find(d => d.isVested);
+        const fe = series.find(d => d.pension !== null);
+        const firstVestedDate   = fv ? fv.retDate : null;
+        const firstEligibleDate = fe ? fe.retDate : null;
+        if (firstVestedDate && firstVestedDate > xMin)
+          compressedSegs.push({ from: xMin, to: firstVestedDate });
+        if (firstVestedDate && firstEligibleDate && firstEligibleDate > firstVestedDate)
+          compressedSegs.push({ from: firstVestedDate, to: firstEligibleDate });
+      }
+      const eligPxStart  = compressedSegs.length * COMPRESS_PX;
+      const eligPxWidth  = iW - eligPxStart;
+      const eligFromDate = compressedSegs.length > 0
+        ? compressedSegs[compressedSegs.length - 1].to
+        : xMin;
+
+      function xScale(date) {
+        const t = date instanceof Date ? date.getTime() : +date;
+        for (let i = 0; i < compressedSegs.length; i++) {
+          const { from, to } = compressedSegs[i];
+          if (t <= to.getTime()) {
+            const seg_t = (t - from.getTime()) / (to.getTime() - from.getTime());
+            return i * COMPRESS_PX + seg_t * COMPRESS_PX;
+          }
+        }
+        const eligSpan = xMax.getTime() - eligFromDate.getTime();
+        const seg_t = eligSpan > 0 ? (t - eligFromDate.getTime()) / eligSpan : 0;
+        return eligPxStart + seg_t * eligPxWidth;
+      }
+      xScale.invert = function(px) {
+        if (px < eligPxStart && compressedSegs.length > 0) {
+          const i = Math.min(Math.floor(px / COMPRESS_PX), compressedSegs.length - 1);
+          const { from, to } = compressedSegs[i];
+          const seg_t = (px - i * COMPRESS_PX) / COMPRESS_PX;
+          return new Date(from.getTime() + seg_t * (to.getTime() - from.getTime()));
+        }
+        const eligSpan = xMax.getTime() - eligFromDate.getTime();
+        const seg_t = eligSpan > 0 ? (px - eligPxStart) / eligPxWidth : 0;
+        return new Date(eligFromDate.getTime() + seg_t * eligSpan);
+      };
+
       const yScale = d3.scaleLinear().domain([yMin, yMax]).range([iH, 0]);
 
-      // ── Tick values ─────────────────────────────────────────────
+      // ── Tick values (eligible zone only) ────────────────────────
       const xMajorVals = [], xMinorVals = [];
-      for (let yr = xMin.getFullYear(); yr <= xMax.getFullYear() + 1; yr++) {
+      for (let yr = eligFromDate.getFullYear(); yr <= xMax.getFullYear() + 1; yr++) {
         const jan1 = new Date(yr, 0, 1);
-        if (jan1 >= xMin && jan1 <= xMax) xMajorVals.push(jan1);
+        if (jan1 >= eligFromDate && jan1 <= xMax) xMajorVals.push(jan1);
         for (const mo of [2, 4, 6, 8, 10]) {   // Mar, May, Jul, Sep, Nov
           const d = new Date(yr, mo, 1);
-          if (d >= xMin && d <= xMax) xMinorVals.push(d);
+          if (d >= eligFromDate && d <= xMax) xMinorVals.push(d);
         }
       }
       const yMajorVals = d3.range(yMin, yMax + 1, 1000);
@@ -1698,15 +1741,45 @@
 
       // Thin year labels to avoid collision: pick the smallest nice interval
       // (1, 2, 5, 10 yrs) such that labels are at least 36px apart.
-      const pxPerYear = iW / Math.max(1, xMax.getFullYear() - xMin.getFullYear());
+      const pxPerYear = eligPxWidth / Math.max(1, xMax.getFullYear() - eligFromDate.getFullYear());
       const rawEvery  = Math.ceil(36 / pxPerYear);
       const labelEvery = rawEvery <= 1 ? 1 : rawEvery <= 2 ? 2 : rawEvery <= 5 ? 5 : 10;
-      const xLabelVals = xMajorVals.filter(d => d.getFullYear() % labelEvery === 0);
+      // Suppress regular tick labels that would collide with xMin or a zone transition
+      const boundaryXs = [xScale(xMin), ...compressedSegs.map(s => xScale(s.to))];
+      const xLabelVals = xMajorVals.filter(d => {
+        if (d.getFullYear() % labelEvery !== 0) return false;
+        const px = xScale(d);
+        return boundaryXs.every(bx => Math.abs(px - bx) >= 30);
+      });
       g.append('g').selectAll('text').data(xLabelVals).join('text')
         .attr('x', d => xScale(d)).attr('y', iH + 18)
         .attr('text-anchor', 'middle')
         .attr('font-family', CHART.font).attr('font-size', '0.75rem').attr('fill', CHART.colorLabel)
         .text(d => d.getFullYear());
+
+      // xMin label and tick — always rendered
+      g.append('text')
+        .attr('x', 0).attr('y', iH + 18)
+        .attr('text-anchor', 'start')
+        .attr('font-family', CHART.font).attr('font-size', '0.75rem').attr('fill', CHART.colorLabel)
+        .text(xMin.getFullYear());
+      g.append('line')
+        .attr('x1', 0).attr('x2', 0).attr('y1', iH).attr('y2', iH + 6)
+        .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
+
+      // Zone transition labels and tick marks (one per compressed segment boundary)
+      if (compressedSegs.length > 0) {
+        const transitionPts = compressedSegs.map(seg => ({ date: seg.to }));
+        g.append('g').selectAll('text').data(transitionPts).join('text')
+          .attr('x', d => xScale(d.date)).attr('y', iH + 18)
+          .attr('text-anchor', 'middle')
+          .attr('font-family', CHART.font).attr('font-size', '0.75rem').attr('fill', CHART.colorLabel)
+          .text(d => d.date.getFullYear());
+        g.append('g').selectAll('line').data(transitionPts).join('line')
+          .attr('x1', d => xScale(d.date)).attr('x2', d => xScale(d.date))
+          .attr('y1', iH).attr('y2', iH + 6)
+          .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
+      }
 
       g.append('g').selectAll('line').data(xMinorVals).join('line')
         .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
@@ -1776,8 +1849,8 @@
         const entries = [
           ...(hasNotVested     ? [{ type: 'rect', fill: CHART.colorNotVested,   label: 'Not yet vested'                      }] : []),
           ...(hasVestedNotElig ? [{ type: 'rect', fill: CHART.colorIneligible,  label: 'Vested, not yet eligible'            }] : []),
-          { type: 'line', color: CHART.colorLine,          dash: null,  label: 'Pension at retirement'                      },
-          { type: 'line', color: CHART.colorOfficial,      dash: null,  label: 'Official ERS'                               },
+          { type: 'line', color: CHART.colorLine,          dash: null,  label: 'ERS formulas from PDFs'                      },
+          { type: 'line', color: CHART.colorOfficial,      dash: null,  label: 'ERS online calculator'                               },
           ...(hasSL ? [
             { type: 'line', color: CHART.colorSLCurrent,   dash: null,  label: '+ current sick leave'                      },
             { type: 'line', color: CHART.colorSLProjected, dash: '4,3', label: '+ projected sick leave (no usage)'         },
