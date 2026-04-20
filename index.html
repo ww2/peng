@@ -27,36 +27,28 @@
 
     fieldset[disabled] { opacity: 0.5; pointer-events: none; }
 
-    fieldset fieldset {
-      border-color: #ddd;
-      padding: 0.5rem 0.75rem 0.75rem;
-      margin-bottom: 0;
-    }
-
-    legend {
-      font-size: 0.8rem;
-      color: #555;
+    fieldset > legend {
+      font-size: 0.9rem;
+      font-weight: bold;
       padding: 0 0.4rem;
     }
 
-    /* ── Field grid inside Group 1 ── */
-    .field-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.6rem 2rem;
-      align-items: end;
+    /* ── Label-left rows ── */
+    .form-rows { display: flex; flex-direction: column; gap: 1rem; }
+    .form-row  { display: flex; align-items: baseline; gap: 1rem; }
+    .form-row--subgrid { align-items: end; }
+    .form-label {
+      flex: 0 0 20ch;
+      font-size: 0.8rem;
     }
 
-    .field { display: flex; flex-direction: column; gap: 0.2rem; }
-    .field label { font-size: 0.8rem; color: #555; }
     #picker-path { color: #999; }
-    .field select,
-    .field input[type="date"],
-    .field input[type="number"] {
+    .form-row > select,
+    .form-row > input,
+    .input-row input {
       font-family: monospace;
       font-size: 0.9rem;
       padding: 0.25rem;
-      width: 100%;
     }
 
     .input-row { display: flex; gap: 0.4rem; align-items: center; }
@@ -95,8 +87,12 @@
     input[type="date"] { max-width: 16ch; }
 
     /* ── Manual AFC field ── */
-    #group-earnings-input-manual .field { flex-direction: row; align-items: center; }
-    #manual-afc { width: 9ch; }
+    #manual-afc { width: 11ch; }
+
+    /* ── Projected raises table ── */
+    #raises-table { font-size: 0.8rem; border-collapse: collapse; }
+    #raises-table th, #raises-table td { padding: 0.1rem 0.75rem 0.1rem 0; text-align: left; color: #555; }
+    #raises-table th { font-weight: normal; border-bottom: 1px solid #ddd; }
 
     /* ── Gap warnings ── */
     #gap-warnings { margin-top: 0.5rem; font-size: 0.85rem; color: #c60; }
@@ -227,12 +223,12 @@
   <p id="reload-bar"><a id="reload-link" href="#">Reload</a></p>
 
   <!-- ── Group 1: Your information ───────────────────────────── -->
-  <fieldset id="group-plan-input">
-    <legend>Your information</legend>
-    <div class="field-grid">
+  <fieldset id="group-required-input">
+    <legend>Required information</legend>
+    <div class="form-rows">
 
-      <div class="field">
-        <label for="plan">Plan</label>
+      <div class="form-row">
+        <label class="form-label" for="plan">Plan</label>
         <select id="plan">
           <option value="">— select —</option>
           <option value="hybrid-post2012">Hybrid (joined July 2012 or later)</option>
@@ -243,29 +239,32 @@
         </select>
       </div>
 
-      <div class="field" style="grid-column: 1;">
-        <label for="dob">Date of birth</label>
+      <div class="form-row">
+        <label class="form-label" for="dob">Date of birth</label>
         <input type="date" id="dob">
       </div>
 
-      <fieldset style="grid-column: 1 / -1;">
-        <legend>Credited service</legend>
+      <div class="form-row form-row--subgrid">
+        <span class="form-label">Credited service</span>
         <div class="sl-grid">
-          <label for="svc-years">years</label>
-          <label for="svc-months">months</label>
-          <label for="svc-as-of" id="svc-as-of-label">as of</label>
+          <label for="svc-years">Years</label>
+          <label for="svc-months">Months</label>
+          <label for="svc-as-of" id="svc-as-of-label">As of</label>
 
           <input type="number" id="svc-years" min="0" max="50" step="1" placeholder="0" style="width: 6.5ch">
           <input type="number" id="svc-months" min="0" max="11" step="1" placeholder="0" style="width: 5.5ch">
           <div id="svc-as-of-field"><input type="date" id="svc-as-of"></div>
         </div>
-      </fieldset>
+      </div>
 
-      <div class="field">
-        <label for="last-day">Last day of service <span style="color:#888; font-weight:normal;">(blank = still active)</span></label>
-        <div class="input-row">
-          <input type="date" id="last-day">
-          <button type="button" id="last-day-clear" title="Clear">✕</button>
+      <div class="form-row">
+        <label class="form-label" for="last-day">Last day of service</label>
+        <div style="display:flex; flex-direction:column; gap:0.15rem;">
+          <div class="input-row">
+            <input type="date" id="last-day">
+            <button type="button" id="last-day-clear" title="Clear">✕</button>
+          </div>
+          <span style="color:#888; font-size:0.8rem;">Leave blank if still active</span>
         </div>
       </div>
 
@@ -275,24 +274,41 @@
   <!-- ── Group 2: Optional adjustments ───────────────────────── -->
   <fieldset id="group-optional-input">
     <legend>Optional adjustments</legend>
-    <div class="field-grid">
+    <div class="form-rows">
 
-      <fieldset style="grid-column: 1 / -1;">
-        <legend>Sick leave</legend>
+      <div class="form-row form-row--subgrid">
+        <span class="form-label">Sick leave</span>
         <div class="sl-grid">
           <label for="sl-hours">Unused hours</label>
-          <label for="sl-as-of">as of</label>
-          <label for="sl-rate">accrual (hours/month)</label>
+          <label for="sl-as-of">As of</label>
+          <label for="sl-rate">Adding</label>
 
           <input type="number" id="sl-hours" min="0" step="1" placeholder="optional" style="width:12ch">
           <input type="date" id="sl-as-of">
-          <input type="number" id="sl-rate" min="0" step="0.5" value="14" class="no-spin" style="width:5ch">
+          <div style="display:flex; align-items:baseline; gap:0.3rem;">
+            <input type="number" id="sl-rate" min="0" step="0.5" value="14" class="no-spin" style="width:5ch">
+            <span style="font-size:0.8rem; color:#555;">hours per month</span>
+          </div>
         </div>
-      </fieldset>
+      </div>
 
-      <div class="field">
-        <label for="raise-rate">Annual pay raise (%)</label>
-        <input type="number" id="raise-rate" min="0" max="20" step="0.1" placeholder="optional" style="width:12ch">
+    </div>
+  </fieldset>
+
+  <!-- ── Contractual adjustments (read-only) ──────────────────── -->
+  <fieldset id="group-contractual-input">
+    <legend>Contractual adjustments</legend>
+    <div class="form-rows">
+
+      <div class="form-row">
+        <span class="form-label">Projected raises</span>
+        <table id="raises-table">
+          <tbody>
+            <tr><td>2026-07-01</td><td>3.79%</td></tr>
+            <tr><td>2027-07-01</td><td>4.00%</td></tr>
+            <tr><td>2028-07-01</td><td>4.00%</td></tr>
+          </tbody>
+        </table>
       </div>
 
     </div>
@@ -301,11 +317,12 @@
   <!-- ── Group 3: Earnings data ───────────────────────────────── -->
   <fieldset id="group-earnings-input" disabled>
     <legend>Earnings data</legend>
+    <div class="form-rows">
 
     <!-- Option B: manual AFC -->
     <div id="group-earnings-input-manual">
-      <div class="field">
-        <label for="manual-afc">Monthly AFC ($)</label>
+      <div class="form-row">
+        <label class="form-label" for="manual-afc">Monthly AFC ($)</label>
         <input type="text" inputmode="decimal" id="manual-afc" placeholder="e.g. 4413.00">
       </div>
     </div>
@@ -315,8 +332,8 @@
     <!-- Option A: paystub directory -->
     <div id="group-earnings-input-picker">
       <div id="picker-controls">
-        <div class="field">
-          <label for="picker-btn">Paystub directory<span id="picker-path"></span></label>
+        <div class="form-row">
+          <label class="form-label" for="picker-btn">Paystub directory<span id="picker-path"></span></label>
           <div>
             <button id="picker-btn" type="button">Choose directory…</button>
             <input type="file" id="picker" webkitdirectory accept=".pdf" style="display:none">
@@ -339,11 +356,12 @@
       </details>
     </div>
 
+    </div>
   </fieldset>
 
   <!-- ── Calculate ────────────────────────────────────────────── -->
   <div id="action-row">
-    <button id="clear-btn" type="button">Clear</button>
+    <button id="clear-btn" type="button">Clear all fields</button>
     <span id="status-line"></span>
   </div>
 
@@ -367,10 +385,13 @@
       colorAxis      : '#555',
       colorLabel     : '#333',
       colorMinor     : '#bbb',
-      colorSLCurrent : '#1a8c4e',
-      colorSLProjected: '#72b572',
-      colorPrimary  : '#0000cc',
-      colorCola      : '#cc6600',
+      colorPrimary  : '#0000ff',
+      colorSLCurrent : '#0066ff',
+      colorSLProjected: '#0066ff',
+      colorCola      : '#00cc00',
+      colorRaises           : '#7700cc',
+      colorRaisesSLCurrent  : '#aa33dd',
+      colorRaisesSLProjected: '#cc88ee',
       colorTitle     : '#222',
       colorCrosshair : '#aaa',
     };
@@ -400,7 +421,6 @@
     const slHoursEl         = document.getElementById('sl-hours');
     const slAsOfEl          = document.getElementById('sl-as-of');
     const slRateEl          = document.getElementById('sl-rate');
-    const raiseRateEl       = document.getElementById('raise-rate');
     const debugDetails     = document.getElementById('debug-details');
     const debugBody        = document.getElementById('debug-body');
     const debugPanelEl     = document.getElementById('debug-panel');
@@ -414,6 +434,13 @@
       'contributory-pre2012':  { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025, earlyPenalty: 0.05 },
       'noncontributory':       { multiplier: 0.0125, N: 3, mode: 'total',   vestingMonths: 120, colaRate: 0.025, earlyPenalty: 0.06 },
     };
+
+    // ── Projected raises (union contract, not yet absorbed into AFC) ──
+    const RAISES = [
+      { date: new Date('2026-07-01'), rate: 0.0379 },
+      { date: new Date('2027-07-01'), rate: 0.04   },
+      { date: new Date('2028-07-01'), rate: 0.04   },
+    ];
 
     // ── ARF tables ───────────────────────────────────
     // Copied verbatim from ers.data.js (tier1) and ers.dataNew.js (tier2).
@@ -1027,10 +1054,23 @@
       return whole + (remainder >= 10 ? 1 : 0);
     }
 
+    // Returns afcMonthly grown by each scheduled raise, blended in linearly
+    // over the plan's N-year averaging window. Naturally underestimates for
+    // retirements within N years of a raise (covers the planning horizon).
+    function applyRaises(afcMonthly, retDate, N) {
+      let afc = afcMonthly;
+      for (const { date, rate } of RAISES) {
+        if (retDate <= date) continue;
+        const blend = Math.min(1, monthsBetween(date, retDate) / (N * 12));
+        afc *= (1 + rate * blend);
+      }
+      return afc;
+    }
+
     // ── Pension series ───────────────────────────────────────────
     // Returns an array of rows, one per candidate retirement month, from the
     // 1st of next month through 10 years past the first normal retirement month.
-    function calculateSeries({ plan, dob, enteredSvcMonths, asOfDate, lastDayOfSvc, afcMonthly, slHours, slRate, slAsOf, raiseRate = 0 }) {
+    function calculateSeries({ plan, dob, enteredSvcMonths, asOfDate, lastDayOfSvc, afcMonthly, slHours, slRate, slAsOf }) {
       const config = PLAN_CONFIGS[plan];
       const today  = new Date();
       const start  = new Date(today.getFullYear(), today.getMonth() + 1, 1);
@@ -1078,8 +1118,9 @@
 
         let pensionCurrentSL = null;
         let pensionProjectedSL = null;
+        let pensionRaisesCurrentSL = null;
+        let pensionRaisesProjectedSL = null;
 
-        // estimated pension: no raise rate, no sick leave, month-level ARF table.
         const svcYrs    = Math.floor(svcAtM / 12);
         const svcMos    = svcAtM % 12;
         const eligAge   = primaryEligAge(dob, retDate);
@@ -1088,6 +1129,9 @@
         const arf       = primaryARF(offElig, plan, arfAge.year, arfAge.month);
         const primaryPension = offElig === 'ineligible' ? null
           : Math.floor(Math.round(afcMonthly * (svcYrs + svcMos / 12) * config.multiplier * arf * 100) / 100);
+        const raisedAfc = applyRaises(afcMonthly, retDate, config.N);
+        const pensionWithRaises = offElig === 'ineligible' ? null
+          : Math.floor(Math.round(raisedAfc * (svcYrs + svcMos / 12) * config.multiplier * arf * 100) / 100);
 
         if (slHours != null && slAsOf != null && offElig !== 'ineligible') {
           const accrualEnd   = lastDayOfSvc
@@ -1101,11 +1145,15 @@
             Math.floor(Math.round(afcMonthly * (svc / 12) * config.multiplier * arf * 100) / 100);
           pensionCurrentSL   = calcPrimary(svcAtM + currentMo);
           pensionProjectedSL = calcPrimary(svcAtM + projectedMo);
+          const calcRaised = svc =>
+            Math.floor(Math.round(raisedAfc * (svc / 12) * config.multiplier * arf * 100) / 100);
+          pensionRaisesCurrentSL   = calcRaised(svcAtM + currentMo);
+          pensionRaisesProjectedSL = calcRaised(svcAtM + projectedMo);
         }
 
         const status   = isNormal ? 'normal' : isEarly ? 'early' : 'ineligible';
         const isVested = svcAtM >= config.vestingMonths;
-        rows.push({ retDate, svcAtM, ageAtM, status, isVested, pensionCurrentSL, pensionProjectedSL, primaryPension });
+        rows.push({ retDate, svcAtM, ageAtM, status, isVested, pensionCurrentSL, pensionProjectedSL, pensionRaisesCurrentSL, pensionRaisesProjectedSL, primaryPension, pensionWithRaises });
 
         if (status === 'normal' && !firstNormalDate) firstNormalDate = retDate;
         if (firstNormalDate && retDate >= addMonths(firstNormalDate, 120)) break;
@@ -1257,17 +1305,8 @@
       const lastWin = lastWindows[lastWindows.length - 1];
       if (!lastWin) return;
       const regularAvg = lastWin.stubs.reduce((sum, s) => sum + scoreStub(s, 'regular'), 0) / 12;
-      const raiseRate  = parseFloat(raiseRateEl.value) / 100 || 0;
-      if (raiseRate > 0) {
-        const today        = new Date();
-        const yearsElapsed = Math.max(0, monthsBetween(lastWin.endIncl, today)) / 12;
-        const projected    = regularAvg * Math.pow(1 + raiseRate, yearsElapsed);
-        regularEarningsEl.textContent =
-          `Regular avg earnings (${fmtDate(lastWin.start)} – ${fmtDate(lastWin.endIncl)}): $${fmtMoney(regularAvg)}/mo → now: $${fmtMoney(projected)}/mo`;
-      } else {
-        regularEarningsEl.textContent =
-          `Regular avg earnings (${fmtDate(lastWin.start)} – ${fmtDate(lastWin.endIncl)}): $${fmtMoney(regularAvg)}/mo`;
-      }
+      regularEarningsEl.textContent =
+        `Regular avg earnings (${fmtDate(lastWin.start)} – ${fmtDate(lastWin.endIncl)}): $${fmtMoney(regularAvg)}/mo`;
     }
 
     // ── AFC computation ──────────────────────────────────────────
@@ -1462,11 +1501,6 @@
       el.addEventListener('input', maybeCalculate)
     );
     manualAfcEl.addEventListener('change', maybeCalculate);
-    raiseRateEl.addEventListener('input', () => {
-      updateRegularEarningsDisplay();
-      maybeCalculate();
-      updateReloadLink();
-    });
 
     function runCalculate() {
       const lastDayVal   = lastDayEl.value;
@@ -1477,7 +1511,6 @@
       const slAsOf   = slAsOfEl.value ? parseIsoDate(slAsOfEl.value) : null;
       if (!isNaN(slHours) && slHours <= 0)
         console.warn(`Sick leave hours (${slHours}) must be positive; ignoring.`);
-      const raiseRate = parseFloat(raiseRateEl.value) / 100 || 0;
       const series  = calculateSeries({
         plan             : planEl.value,
         dob              : parseIsoDate(dobEl.value),
@@ -1488,7 +1521,6 @@
         slHours          : isNaN(slHours) || slHours <= 0 ? null : slHours,
         slRate           : parseFloat(slRateEl.value) || 14,
         slAsOf,
-        raiseRate,
       });
       window._debug.lastSeries = series;
       const eligible = series.filter(d => d.primaryPension !== null);
@@ -1500,7 +1532,7 @@
 
     function runClear() {
       // Form inputs
-      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, slAsOfEl, raiseRateEl]
+      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, slAsOfEl]
         .forEach(el => { el.value = ''; });
       slRateEl.value = '14';
 
@@ -1595,7 +1627,6 @@
       add('slHours',    slHoursEl);
       add('slAsOf',     slAsOfEl);
       if (slRateEl.value && slRateEl.value !== '14') add('slRate', slRateEl);
-      add('raiseRate',  raiseRateEl);
       const qs = params.toString();
       return window.location.pathname + (qs ? '?' + qs : '');
     }
@@ -1607,7 +1638,6 @@
     [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
       el.addEventListener('input', updateReloadLink)
     );
-    // raiseRateEl updateReloadLink is handled in its own listener above
     manualAfcEl.addEventListener('change', updateReloadLink);
 
     function commitAfc(e) {
@@ -1626,7 +1656,7 @@
     manualAfcEl.addEventListener('input',   commitAfc);
 
     // ── URL parameter pre-fill ────────────────────────────────────
-    // Supported params: plan, dob, svcYears, svcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate, raiseRate
+    // Supported params: plan, dob, svcYears, svcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate
     // Example: ?plan=hybrid-post2012&dob=1975-06-15&svcYears=15&svcMonths=3&afc=4500
     {
       const p = new URLSearchParams(window.location.search);
@@ -1641,7 +1671,6 @@
       set(slHoursEl,   'slHours');
       set(slAsOfEl,    'slAsOf');
       set(slRateEl,    'slRate');
-      set(raiseRateEl, 'raiseRate');
       prevPlanValue             = planEl.value;
       earningsFieldset.disabled = !planEl.value;
       syncAsOfVisibility();
@@ -1680,7 +1709,7 @@
         : 0;
       const yMax = eligible.length
         ? Math.ceil(Math.max(...eligible.flatMap(d =>
-            [d.pensionCurrentSL, d.pensionProjectedSL, d.primaryPension].filter(v => v != null)
+            [d.pensionCurrentSL, d.pensionProjectedSL, d.pensionRaisesCurrentSL, d.pensionRaisesProjectedSL, d.primaryPension, d.pensionWithRaises].filter(v => v != null)
           )) / 1000) * 1000
         : 5000;
 
@@ -1883,9 +1912,14 @@
           if (dashArray) path.attr('stroke-dasharray', dashArray);
         };
 
+        if (hasSL) {
+          makeCurve(d => d.pensionRaisesProjectedSL, CHART.colorRaisesSLProjected, '4,3');
+          makeCurve(d => d.pensionRaisesCurrentSL,   CHART.colorRaisesSLCurrent);
+        }
+        makeCurve(d => d.pensionWithRaises,   CHART.colorRaises);
         makeCurve(d => d.pensionProjectedSL, CHART.colorSLProjected, '4,3');
         makeCurve(d => d.pensionCurrentSL,   CHART.colorSLCurrent);
-        makeCurve(d => d.primaryPension,    CHART.colorPrimary);
+        makeCurve(d => d.primaryPension,     CHART.colorPrimary);
       }
 
       // ── Axis baselines ──────────────────────────────────────────
@@ -1918,8 +1952,13 @@
           ...(hasVestedNotElig ? [{ type: 'rect', fill: CHART.colorIneligible,  label: 'Vested, not yet eligible'            }] : []),
           { type: 'line', color: CHART.colorPrimary,      dash: null,  label: 'estimated pension'                                   },
           ...(hasSL ? [
-            { type: 'line', color: CHART.colorSLCurrent,   dash: null,  label: '+ current sick leave'                      },
-            { type: 'line', color: CHART.colorSLProjected, dash: '4,3', label: '+ projected sick leave (no usage)'         },
+            { type: 'line', color: CHART.colorSLCurrent,        dash: null,  label: '+ current sick leave'                 },
+            { type: 'line', color: CHART.colorSLProjected,      dash: '4,3', label: '+ projected sick leave (no usage)'    },
+          ] : []),
+          { type: 'line', color: CHART.colorRaises,              dash: null,  label: '+ projected raises'                  },
+          ...(hasSL ? [
+            { type: 'line', color: CHART.colorRaisesSLCurrent,   dash: null,  label: '+ raises + current sick leave'       },
+            { type: 'line', color: CHART.colorRaisesSLProjected, dash: '4,3', label: '+ raises + projected sick leave'     },
           ] : []),
           { type: 'line', color: CHART.colorCola,          dash: '4,3', label: 'COLA projection (on hover)'                },
         ];
@@ -1998,6 +2037,7 @@
 
         const tip = g.append('g').attr('display', 'none');
 
+/*
         tip.append('line').attr('class', 'tip-v')
           .attr('y1', 0).attr('y2', iH)
           .attr('stroke', CHART.colorCrosshair).attr('stroke-width', 1).attr('stroke-dasharray', '4,3');
@@ -2005,6 +2045,7 @@
         tip.append('line').attr('class', 'tip-h')
           .attr('x1', 0).attr('x2', iW)
           .attr('stroke', CHART.colorCrosshair).attr('stroke-width', 1).attr('stroke-dasharray', '4,3');
+*/
 
         tip.append('circle').attr('class', 'tip-dot')
           .attr('r', 3.5).attr('fill', CHART.colorPrimary);
@@ -2014,6 +2055,15 @@
 
         tip.append('circle').attr('class', 'tip-dot-sl-projected')
           .attr('r', 3.5).attr('fill', CHART.colorSLProjected).attr('display', 'none');
+
+        tip.append('circle').attr('class', 'tip-dot-raises')
+          .attr('r', 3.5).attr('fill', CHART.colorRaises);
+
+        tip.append('circle').attr('class', 'tip-dot-raises-sl-current')
+          .attr('r', 3.5).attr('fill', CHART.colorRaisesSLCurrent).attr('display', 'none');
+
+        tip.append('circle').attr('class', 'tip-dot-raises-sl-projected')
+          .attr('r', 3.5).attr('fill', CHART.colorRaisesSLProjected).attr('display', 'none');
 
         const colaPath = tip.append('g').attr('clip-path', 'url(#plot-clip)')
           .append('path')
@@ -2056,13 +2106,26 @@
             tip.select('.tip-dot-sl-projected')
               .attr('cx', px).attr('cy', hasSL ? yScale(pt.pensionProjectedSL) : 0)
               .attr('display', hasSL ? null : 'none');
+            tip.select('.tip-dot-raises')
+              .attr('cx', px).attr('cy', yScale(pt.pensionWithRaises));
+            tip.select('.tip-dot-raises-sl-current')
+              .attr('cx', px).attr('cy', hasSL ? yScale(pt.pensionRaisesCurrentSL)   : 0)
+              .attr('display', hasSL ? null : 'none');
+            tip.select('.tip-dot-raises-sl-projected')
+              .attr('cx', px).attr('cy', hasSL ? yScale(pt.pensionRaisesProjectedSL) : 0)
+              .attr('display', hasSL ? null : 'none');
 
             // Pick the curve closest to the cursor's Y position
             const candidates = [
-              { pension: pt.primaryPension,    label: '',              color: CHART.colorPrimary    },
+              { pension: pt.primaryPension,    label: '',                     color: CHART.colorPrimary          },
               ...(hasSL ? [
-                { pension: pt.pensionCurrentSL,   label: ' (+ cur. SL)',  color: CHART.colorSLCurrent   },
-                { pension: pt.pensionProjectedSL, label: ' (+ proj. SL)', color: CHART.colorSLProjected },
+                { pension: pt.pensionCurrentSL,          label: ' (+ cur. SL)',         color: CHART.colorSLCurrent         },
+                { pension: pt.pensionProjectedSL,        label: ' (+ proj. SL)',        color: CHART.colorSLProjected       },
+              ] : []),
+              { pension: pt.pensionWithRaises,           label: ' (+ raises)',           color: CHART.colorRaises            },
+              ...(hasSL ? [
+                { pension: pt.pensionRaisesCurrentSL,   label: ' (+ raises + cur. SL)',  color: CHART.colorRaisesSLCurrent   },
+                { pension: pt.pensionRaisesProjectedSL, label: ' (+ raises + proj. SL)', color: CHART.colorRaisesSLProjected },
               ] : []),
             ];
             const closest = candidates.reduce((best, c) =>
