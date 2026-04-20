@@ -341,7 +341,7 @@
       colorMinor     : '#bbb',
       colorSLCurrent : '#1a8c4e',
       colorSLProjected: '#72b572',
-      colorOfficial  : '#0000cc',
+      colorPrimary  : '#0000cc',
       colorCola      : '#cc6600',
       colorTitle     : '#222',
       colorCrosshair : '#aaa',
@@ -391,7 +391,7 @@
     // Copied verbatim from ers.data.js (tier1) and ers.dataNew.js (tier2).
     // Each table is keyed by [ageYear][monthIndex 0–11].
     // A missing key falls back to ARF = 1 (normal retirement, no penalty).
-    const OFFICIAL_ARF_TABLES = {
+    const PRIMARY_ARF_TABLES = {
       tier1: {
         // Hybrid pre-2012: early retirement ages 55–61; normal at 62.
         tableH: {
@@ -497,10 +497,10 @@
       },
     };
 
-    // Age calculation used by the official calculator for the ARF table lookup.
+    // Age calculation used by the source calculator for the ARF table lookup.
     // Differs from fractionalAge(): days >= 15 rounds up to the next month.
     // Returns { year, month } where month is 0-based (Jan = 0).
-    function officialArfAge(dob, retDate) {
+    function primaryArfAge(dob, retDate) {
       let dayDiff   = retDate.getDate()     - dob.getDate();
       let monthDiff = retDate.getMonth()    - dob.getMonth();
       let yearDiff  = retDate.getFullYear() - dob.getFullYear();
@@ -511,10 +511,10 @@
       return { year: yearDiff, month: monthDiff };
     }
 
-    // Age calculation used by the official calculator for eligibility checks.
-    // No day-rounding (unlike officialArfAge) — just carries borrows across months/years.
+    // Age calculation used by the source calculator for eligibility checks.
+    // No day-rounding (unlike primaryArfAge) — just carries borrows across months/years.
     // Returns { year, month, day } where day is the residual after borrow adjustment.
-    function officialEligAge(dob, retDate) {
+    function primaryEligAge(dob, retDate) {
       let dayDiff   = retDate.getDate()     - dob.getDate();
       let monthDiff = retDate.getMonth()    - dob.getMonth();
       let yearDiff  = retDate.getFullYear() - dob.getFullYear();
@@ -524,9 +524,9 @@
     }
 
     // Returns 'regular', 'early', or 'ineligible'.
-    // eligAge must be the result of officialEligAge(dob, retDate).
+    // eligAge must be the result of primaryEligAge(dob, retDate).
     // svcYears is total credited service in whole years (Math.floor(svcMonths / 12)).
-    function officialEligibility(plan, eligAge, svcYears) {
+    function primaryEligibility(plan, eligAge, svcYears) {
       const y   = eligAge.year;
       const pbd = eligAge.month * 30 + eligAge.day; // days past birthday; >0 means past exact birthday
       switch (plan) {
@@ -555,20 +555,20 @@
       }
     }
 
-    // Returns the Age Reduction Factor from the official lookup tables.
-    // arfYear/arfMonth must come from officialArfAge().
-    function officialARF(eligibility, plan, arfYear, arfMonth) {
+    // Returns the Age Reduction Factor from the primary lookup tables.
+    // arfYear/arfMonth must come from primaryArfAge().
+    function primaryARF(eligibility, plan, arfYear, arfMonth) {
       if (eligibility === 'regular')    return 1;
       if (eligibility === 'ineligible') return 0;
       const tier     = plan.endsWith('post2012') ? 'tier2' : 'tier1';
       const tableKey = plan.startsWith('hybrid')        ? 'tableH'
                      : plan === 'noncontributory'        ? 'tableNonCon'
                      :                                    'tableCon1';
-      return OFFICIAL_ARF_TABLES[tier]?.[tableKey]?.[arfYear]?.[arfMonth] ?? 1;
+      return PRIMARY_ARF_TABLES[tier]?.[tableKey]?.[arfYear]?.[arfMonth] ?? 1;
     }
 
     // Expose for console testing (module scope is not accessible otherwise).
-    window._debug = { officialArfAge, officialEligAge, officialEligibility, officialARF, OFFICIAL_ARF_TABLES };
+    window._debug = { primaryArfAge, primaryEligAge, primaryEligibility, primaryARF, PRIMARY_ARF_TABLES };
 
     // ── Directory picker ─────────────────────────────────────────
     let pdfFiles        = {};
@@ -1054,11 +1054,11 @@
         // estimated pension: no raise rate, no sick leave, month-level ARF table.
         const svcYrs    = Math.floor(svcAtM / 12);
         const svcMos    = svcAtM % 12;
-        const eligAge   = officialEligAge(dob, retDate);
-        const arfAge    = officialArfAge(dob, retDate);
-        const offElig   = officialEligibility(plan, eligAge, svcYrs);
-        const arf       = officialARF(offElig, plan, arfAge.year, arfAge.month);
-        const officialPension = offElig === 'ineligible' ? null
+        const eligAge   = primaryEligAge(dob, retDate);
+        const arfAge    = primaryArfAge(dob, retDate);
+        const offElig   = primaryEligibility(plan, eligAge, svcYrs);
+        const arf       = primaryARF(offElig, plan, arfAge.year, arfAge.month);
+        const primaryPension = offElig === 'ineligible' ? null
           : Math.floor(Math.round(afcMonthly * (svcYrs + svcMos / 12) * config.multiplier * arf * 100) / 100);
 
         if (slHours != null && slAsOf != null && offElig !== 'ineligible') {
@@ -1069,15 +1069,15 @@
           const projectedMo  = sickLeaveToMonths(
             slHours + slRate * Math.max(0, monthsBetween(slAsOf, accrualEnd))
           );
-          const calcOfficial = svc =>
+          const calcPrimary = svc =>
             Math.floor(Math.round(afcMonthly * (svc / 12) * config.multiplier * arf * 100) / 100);
-          pensionCurrentSL   = calcOfficial(svcAtM + currentMo);
-          pensionProjectedSL = calcOfficial(svcAtM + projectedMo);
+          pensionCurrentSL   = calcPrimary(svcAtM + currentMo);
+          pensionProjectedSL = calcPrimary(svcAtM + projectedMo);
         }
 
         const status   = isNormal ? 'normal' : isEarly ? 'early' : 'ineligible';
         const isVested = svcAtM >= config.vestingMonths;
-        rows.push({ retDate, svcAtM, ageAtM, status, isVested, pensionCurrentSL, pensionProjectedSL, officialPension });
+        rows.push({ retDate, svcAtM, ageAtM, status, isVested, pensionCurrentSL, pensionProjectedSL, primaryPension });
 
         if (status === 'normal' && !firstNormalDate) firstNormalDate = retDate;
         if (firstNormalDate && retDate >= addMonths(firstNormalDate, 120)) break;
@@ -1463,7 +1463,7 @@
         raiseRate,
       });
       window._debug.lastSeries = series;
-      const eligible = series.filter(d => d.officialPension !== null);
+      const eligible = series.filter(d => d.primaryPension !== null);
       statusLine.textContent = eligible.length === 0
         ? 'No eligible retirement dates found.' : '';
       const hasSL = !(isNaN(slHours) || slHours <= 0) && slAsOf !== null;
@@ -1644,15 +1644,15 @@
       const xMin = series ? series[0].retDate                 : fallbackXMin;
       const xMax = series ? series[series.length - 1].retDate : fallbackXMax;
 
-      const eligible = series ? series.filter(d => d.officialPension !== null) : [];
+      const eligible = series ? series.filter(d => d.primaryPension !== null) : [];
       const yMin = eligible.length
         ? Math.floor(Math.min(...eligible.flatMap(d =>
-            [d.officialPension].filter(v => v != null)
+            [d.primaryPension].filter(v => v != null)
           )) / 1000) * 1000
         : 0;
       const yMax = eligible.length
         ? Math.ceil(Math.max(...eligible.flatMap(d =>
-            [d.pensionCurrentSL, d.pensionProjectedSL, d.officialPension].filter(v => v != null)
+            [d.pensionCurrentSL, d.pensionProjectedSL, d.primaryPension].filter(v => v != null)
           )) / 1000) * 1000
         : 5000;
 
@@ -1660,7 +1660,7 @@
       const compressedSegs = [];
       if (series && series.length) {
         const fv = series.find(d => d.isVested);
-        const fe = series.find(d => d.officialPension !== null);
+        const fe = series.find(d => d.primaryPension !== null);
         const firstVestedDate   = fv ? fv.retDate : null;
         const firstEligibleDate = fe ? fe.retDate : null;
         if (firstVestedDate && firstVestedDate > xMin)
@@ -1717,7 +1717,7 @@
       // ── Ineligible region shading ───────────────────────────────
       if (series && series.length) {
         const firstVested   = series.find(d => d.isVested);
-        const firstEligible = series.find(d => d.officialPension !== null);
+        const firstEligible = series.find(d => d.primaryPension !== null);
         const vestedX   = firstVested   ? xScale(firstVested.retDate)   : iW;
         const eligibleX = firstEligible ? xScale(firstEligible.retDate) : iW;
 
@@ -1857,7 +1857,7 @@
 
         makeCurve(d => d.pensionProjectedSL, CHART.colorSLProjected, '4,3');
         makeCurve(d => d.pensionCurrentSL,   CHART.colorSLCurrent);
-        makeCurve(d => d.officialPension,    CHART.colorOfficial);
+        makeCurve(d => d.primaryPension,    CHART.colorPrimary);
       }
 
       // ── Axis baselines ──────────────────────────────────────────
@@ -1884,11 +1884,11 @@
       // ── Legend (left-justified rows below x-axis label) ─────────
       if (series && eligible.length) {
         const hasNotVested     = series.some(d => !d.isVested);
-        const hasVestedNotElig = series.some(d => d.isVested && d.officialPension === null);
+        const hasVestedNotElig = series.some(d => d.isVested && d.primaryPension === null);
         const entries = [
           ...(hasNotVested     ? [{ type: 'rect', fill: CHART.colorNotVested,   label: 'Not yet vested'                      }] : []),
           ...(hasVestedNotElig ? [{ type: 'rect', fill: CHART.colorIneligible,  label: 'Vested, not yet eligible'            }] : []),
-          { type: 'line', color: CHART.colorOfficial,      dash: null,  label: 'estimated pension'                                   },
+          { type: 'line', color: CHART.colorPrimary,      dash: null,  label: 'estimated pension'                                   },
           ...(hasSL ? [
             { type: 'line', color: CHART.colorSLCurrent,   dash: null,  label: '+ current sick leave'                      },
             { type: 'line', color: CHART.colorSLProjected, dash: '4,3', label: '+ projected sick leave (no usage)'         },
@@ -1979,7 +1979,7 @@
           .attr('stroke', CHART.colorCrosshair).attr('stroke-width', 1).attr('stroke-dasharray', '4,3');
 
         tip.append('circle').attr('class', 'tip-dot')
-          .attr('r', 3.5).attr('fill', CHART.colorOfficial);
+          .attr('r', 3.5).attr('fill', CHART.colorPrimary);
 
         tip.append('circle').attr('class', 'tip-dot-sl-current')
           .attr('r', 3.5).attr('fill', CHART.colorSLCurrent).attr('display', 'none');
@@ -2021,7 +2021,7 @@
             // All dots — shown on every active curve for context
             const hasSL = pt.pensionCurrentSL != null;
             tip.select('.tip-dot')
-              .attr('cx', px).attr('cy', yScale(pt.officialPension));
+              .attr('cx', px).attr('cy', yScale(pt.primaryPension));
             tip.select('.tip-dot-sl-current')
               .attr('cx', px).attr('cy', hasSL ? yScale(pt.pensionCurrentSL)  : 0)
               .attr('display', hasSL ? null : 'none');
@@ -2031,7 +2031,7 @@
 
             // Pick the curve closest to the cursor's Y position
             const candidates = [
-              { pension: pt.officialPension,    label: '',              color: CHART.colorOfficial    },
+              { pension: pt.primaryPension,    label: '',              color: CHART.colorPrimary    },
               ...(hasSL ? [
                 { pension: pt.pensionCurrentSL,   label: ' (+ cur. SL)',  color: CHART.colorSLCurrent   },
                 { pension: pt.pensionProjectedSL, label: ' (+ proj. SL)', color: CHART.colorSLProjected },
