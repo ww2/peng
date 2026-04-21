@@ -23,6 +23,7 @@
       border-radius: 3px;
       padding: 0.75rem 1rem 1rem;
       margin-bottom: 1rem;
+      min-width: max-content;
     }
 
     fieldset[disabled] { opacity: 0.5; pointer-events: none; }
@@ -285,11 +286,9 @@
 
           <input type="number" id="sl-hours" min="0" step="1" placeholder="optional" style="width:12ch">
           <input type="date" id="sl-as-of">
-          <div style="display:flex; align-items:baseline; gap:0.3rem;">
-            <input type="number" id="sl-rate" min="0" step="0.5" value="14" class="no-spin" style="width:5ch">
-            <span style="font-size:0.8rem; color:#555;">hours per month</span>
-          </div>
+          <input type="number" id="sl-rate" min="0" step="0.5" value="14" class="no-spin" style="width:5ch">
         </div>
+        <span class="form-label" style="font-size:0.8rem; color:#555;">hours per month</span>
       </div>
 
     </div>
