@@ -152,12 +152,14 @@
       margin-bottom: 1.25rem;
     }
 
-    #clear-btn {
+    #graph-btn, #clear-btn {
       font-family: monospace;
       font-size: 0.95rem;
       padding: 0.35rem 1rem;
       cursor: pointer;
     }
+
+    .input-error { outline: 2px solid #c00 !important; }
 
     #status-line { font-size: 0.85rem; color: #c00; }
     #status-line:empty { display: none; }
@@ -360,6 +362,7 @@
 
   <!-- ── Calculate ────────────────────────────────────────────── -->
   <div id="action-row">
+    <button id="graph-btn" type="button">Generate graph</button>
     <button id="clear-btn" type="button">Clear all fields</button>
     <span id="status-line"></span>
   </div>
@@ -411,6 +414,7 @@
     const reloadLink       = document.getElementById('reload-link');
     const reloadLinkBottom = document.getElementById('reload-link-bottom');
     const clearBtn         = document.getElementById('clear-btn');
+    const graphBtn         = document.getElementById('graph-btn');
     const pickerEl         = document.getElementById('picker');
     const pickerBtn        = document.getElementById('picker-btn');
     const cancelBtn        = document.getElementById('cancel-btn');
@@ -1570,6 +1574,34 @@
     }
 
     clearBtn.addEventListener('click', runClear);
+
+    graphBtn.addEventListener('click', () => {
+      const errors = [];
+      function mark(el) {
+        el.classList.add('input-error');
+        const clear = () => {
+          el.classList.remove('input-error');
+          el.removeEventListener('input',  clear);
+          el.removeEventListener('change', clear);
+        };
+        el.addEventListener('input',  clear);
+        el.addEventListener('change', clear);
+        errors.push(el);
+      }
+
+      if (!planEl.value)  mark(planEl);
+      if (!dobEl.value)   mark(dobEl);
+      // svc-as-of is only visible (and only the satisfying field) when lastDay is blank
+      if (!lastDayEl.value && !svcAsOfEl.value) mark(svcAsOfEl);
+      // AFC is only meaningful once a plan is chosen (fieldset enabled)
+      if (!earningsFieldset.disabled && !(parseFloat(manualAfcEl.value) > 0)) mark(manualAfcEl);
+      // sl-as-of required only when sick-leave hours are entered
+      const slH = parseFloat(slHoursEl.value);
+      if (!isNaN(slH) && slH > 0 && !slAsOfEl.value) mark(slAsOfEl);
+
+      if (errors.length) return;
+      runCalculate();
+    });
 
     planEl.addEventListener('input', () => {
       const newVal = planEl.value;
