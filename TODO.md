@@ -1,18 +1,5 @@
 # ERS Pension Graph — Deferred Work
 
-## edge cases
-
-Need to add a checkbox to the 'Contractual adjustments' section, since those are unit-specific
-and I don't want to make them inputs instead of read-only.
-
-Maybe
-
-[x] Include negotiated raises
-
-Projected raises    202x-xx-xx x.xx%
-                    202x-xx-xx x.xx%
-                    202x-xx-xx x.xx%
-
 ## hybrid plan support
 
 Need to redownload the originals, see what all changes need to be made for

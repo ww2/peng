@@ -298,7 +298,13 @@
     <legend>Contractual adjustments</legend>
     <div class="form-rows">
 
-      <div class="form-row">
+      <div class="form-row" style="margin-bottom:0.25rem;">
+        <label style="font-size:0.8rem; display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
+          <input type="checkbox" id="raises-na"> Projected raises do not apply
+        </label>
+      </div>
+
+      <div class="form-row" id="raises-table-row">
         <span class="form-label">Projected raises</span>
         <table id="raises-table">
           <tbody>
@@ -311,6 +317,11 @@
 
     </div>
   </fieldset>
+  <script>
+    document.getElementById('raises-na').addEventListener('change', function() {
+      document.getElementById('raises-table-row').hidden = this.checked;
+    });
+  </script>
 
   <!-- ── Group 3: Earnings data ───────────────────────────────── -->
   <fieldset id="group-earnings-input" disabled>
@@ -404,6 +415,7 @@
     const svcDateEl        = document.getElementById('svc-date');
     const svcDateLabelEl   = document.getElementById('svc-date-label');
     const stillActiveEl    = document.getElementById('still-active');
+    const raisesNaEl       = document.getElementById('raises-na');
     const manualAfcEl      = document.getElementById('manual-afc');
     const earningsFieldset = document.getElementById('group-earnings-input');
     const statusLine       = document.getElementById('status-line');
@@ -1512,6 +1524,7 @@
       el.addEventListener('input', maybeCalculate)
     );
     stillActiveEl.addEventListener('change', maybeCalculate);
+    raisesNaEl.addEventListener('change', maybeCalculate);
     manualAfcEl.addEventListener('change', maybeCalculate);
 
     function runCalculate() {
@@ -1539,7 +1552,8 @@
         ? 'No eligible retirement dates found.' : '';
       const hasSL        = !(isNaN(slHours) || slHours <= 0) && slAsOf !== null;
       const isSeparated  = !stillActiveEl.checked;
-      drawChart(series, { hasSL, isSeparated });
+      const raisesNA     = raisesNaEl.checked;
+      drawChart(series, { hasSL, isSeparated, raisesNA });
     }
 
     function runClear() {
@@ -1668,6 +1682,7 @@
       el.addEventListener('input', updateReloadLink)
     );
     stillActiveEl.addEventListener('change', updateReloadLink);
+    raisesNaEl.addEventListener('change', updateReloadLink);
     manualAfcEl.addEventListener('change', updateReloadLink);
 
     function commitAfc(e) {
@@ -1713,7 +1728,8 @@
       if (canCalculate()) requestAnimationFrame(runCalculate);
     }
     // ── Chart ────────────────────────────────────────────────────
-    function drawChart(series = null, { hasSL = false, isSeparated = false } = {}) {
+    function drawChart(series = null, { hasSL = false, isSeparated = false, raisesNA = false } = {}) {
+      const showRaises = !isSeparated && !raisesNA;
       const svg = d3.select('#chart-svg');
       const W   = svg.node().clientWidth;
       const H   = svg.node().clientHeight;
@@ -1952,7 +1968,7 @@
           if (dashArray) path.attr('stroke-dasharray', dashArray);
         };
 
-        if (!isSeparated) {
+        if (showRaises) {
           if (hasSL) {
             makeCurve(d => d.pensionRaisesProjectedSL, CHART.colorRaisesSLProjected, '4,3');
             makeCurve(d => d.pensionRaisesCurrentSL,   CHART.colorRaisesSLCurrent);
@@ -1997,7 +2013,7 @@
             { type: 'line', color: CHART.colorSLCurrent,        dash: null,  label: '+ current sick leave'                 },
             { type: 'line', color: CHART.colorSLProjected,      dash: '4,3', label: '+ projected sick leave (no usage)'    },
           ] : []),
-          ...(!isSeparated ? [
+          ...(showRaises ? [
             { break: true },
             { type: 'line', color: CHART.colorRaises,              dash: null,  label: '+ projected raises'                  },
             ...(hasSL ? [
@@ -2166,14 +2182,14 @@
               .attr('cx', px).attr('cy', hasSL ? yScale(pt.pensionProjectedSL) : 0)
               .attr('display', hasSL ? null : 'none');
             tip.select('.tip-dot-raises')
-              .attr('cx', isSeparated ? 0 : px).attr('cy', isSeparated ? 0 : yScale(pt.pensionWithRaises))
-              .attr('display', isSeparated ? 'none' : null);
+              .attr('cx', showRaises ? px : 0).attr('cy', showRaises ? yScale(pt.pensionWithRaises) : 0)
+              .attr('display', showRaises ? null : 'none');
             tip.select('.tip-dot-raises-sl-current')
-              .attr('cx', px).attr('cy', !isSeparated && hasSL ? yScale(pt.pensionRaisesCurrentSL)   : 0)
-              .attr('display', !isSeparated && hasSL ? null : 'none');
+              .attr('cx', px).attr('cy', showRaises && hasSL ? yScale(pt.pensionRaisesCurrentSL)   : 0)
+              .attr('display', showRaises && hasSL ? null : 'none');
             tip.select('.tip-dot-raises-sl-projected')
-              .attr('cx', px).attr('cy', !isSeparated && hasSL ? yScale(pt.pensionRaisesProjectedSL) : 0)
-              .attr('display', !isSeparated && hasSL ? null : 'none');
+              .attr('cx', px).attr('cy', showRaises && hasSL ? yScale(pt.pensionRaisesProjectedSL) : 0)
+              .attr('display', showRaises && hasSL ? null : 'none');
 
             // Pick the curve closest to the cursor's Y position
             const candidates = [
@@ -2182,7 +2198,7 @@
                 { pension: pt.pensionCurrentSL,          label: ' (+ cur. SL)',         color: CHART.colorSLCurrent         },
                 { pension: pt.pensionProjectedSL,        label: ' (+ proj. SL)',        color: CHART.colorSLProjected       },
               ] : []),
-              ...(!isSeparated ? [
+              ...(showRaises ? [
                 { pension: pt.pensionWithRaises,           label: ' (+ raises)',           color: CHART.colorRaises            },
                 ...(hasSL ? [
                   { pension: pt.pensionRaisesCurrentSL,   label: ' (+ raises + cur. SL)',  color: CHART.colorRaisesSLCurrent   },
