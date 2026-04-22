@@ -249,25 +249,22 @@
 
       <div class="form-row form-row--subgrid">
         <span class="form-label">Credited service</span>
-        <div class="sl-grid">
+        <div class="sl-grid" style="grid-template-columns: auto auto">
           <label for="svc-years">Years</label>
           <label for="svc-months">Months</label>
-          <label for="svc-as-of" id="svc-as-of-label">As of</label>
 
           <input type="number" id="svc-years" min="0" max="50" step="1" placeholder="0" style="width: 6.5ch">
           <input type="number" id="svc-months" min="0" max="11" step="1" placeholder="0" style="width: 5.5ch">
-          <div id="svc-as-of-field"><input type="date" id="svc-as-of"></div>
         </div>
       </div>
 
       <div class="form-row">
-        <label class="form-label" for="last-day">Last day of service</label>
-        <div style="display:flex; flex-direction:column; gap:0.15rem;">
-          <div class="input-row">
-            <input type="date" id="last-day">
-            <button type="button" id="last-day-clear" title="Clear">✕</button>
-          </div>
-          <span style="color:#888; font-size:0.8rem;">Leave blank if still active</span>
+        <label class="form-label" for="svc-date" id="svc-date-label">Service as of</label>
+        <div style="display:flex; align-items:baseline; gap:0.75rem;">
+          <input type="date" id="svc-date">
+          <label style="font-size:0.8rem; display:flex; align-items:center; gap:0.4rem; cursor:pointer; white-space:nowrap;">
+            <input type="checkbox" id="still-active" checked> Still active
+          </label>
         </div>
       </div>
 
@@ -404,10 +401,9 @@
     const dobEl            = document.getElementById('dob');
     const svcYearsEl       = document.getElementById('svc-years');
     const svcMonthsEl      = document.getElementById('svc-months');
-    const svcAsOfEl        = document.getElementById('svc-as-of');
-    const svcAsOfField     = document.getElementById('svc-as-of-field');
-    const svcAsOfLabel     = document.getElementById('svc-as-of-label');
-    const lastDayEl        = document.getElementById('last-day');
+    const svcDateEl        = document.getElementById('svc-date');
+    const svcDateLabelEl   = document.getElementById('svc-date-label');
+    const stillActiveEl    = document.getElementById('still-active');
     const manualAfcEl      = document.getElementById('manual-afc');
     const earningsFieldset = document.getElementById('group-earnings-input');
     const statusLine       = document.getElementById('status-line');
@@ -429,7 +425,6 @@
     const debugDetails     = document.getElementById('debug-details');
     const debugBody        = document.getElementById('debug-body');
     const debugPanelEl     = document.getElementById('debug-panel');
-    const lastDayClearBtn  = document.getElementById('last-day-clear');
 
     // ── Plan configs ─────────────────────────────────────────────
     const PLAN_CONFIGS = {
@@ -1164,6 +1159,21 @@
         if (firstNormalDate && retDate >= addMonths(firstNormalDate, 120)) break;
       }
 
+      // When separated, service and AFC are frozen so the pension is constant.
+      // The only remaining variation is the early-retirement ARF ramp — suppress
+      // it by snapping every eligible value to its maximum (normal-retirement amount).
+      if (lastDayOfSvc) {
+        const snapMax = key => {
+          const vals = rows.map(r => r[key]).filter(v => v != null);
+          if (!vals.length) return;
+          const max = Math.max(...vals);
+          for (const row of rows) { if (row[key] != null) row[key] = max; }
+        };
+        snapMax('primaryPension');
+        snapMax('pensionCurrentSL');
+        snapMax('pensionProjectedSL');
+      }
+
       return rows;
     }
 
@@ -1488,11 +1498,7 @@
 
     // ── Reactive calculate logic ──────────────────────────────────
     function canCalculate() {
-      const group1Ok = !!(
-        planEl.value &&
-        dobEl.value &&
-        (lastDayEl.value || svcAsOfEl.value)
-      );
+      const group1Ok = !!(planEl.value && dobEl.value && svcDateEl.value);
       const slHours = parseFloat(slHoursEl.value);
       const slOk = isNaN(slHours) || slHours <= 0 || !!slAsOfEl.value;
       return group1Ok && parseFloat(manualAfcEl.value) > 0 && slOk;
@@ -1502,15 +1508,15 @@
       if (canCalculate()) runCalculate(); else drawChart();
     }
 
-    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
+    [dobEl, svcYearsEl, svcMonthsEl, svcDateEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
       el.addEventListener('input', maybeCalculate)
     );
+    stillActiveEl.addEventListener('change', maybeCalculate);
     manualAfcEl.addEventListener('change', maybeCalculate);
 
     function runCalculate() {
-      const lastDayVal   = lastDayEl.value;
-      const lastDayOfSvc = lastDayVal ? parseIsoDate(lastDayVal) : null;
-      const asOfDate     = lastDayOfSvc ?? parseIsoDate(svcAsOfEl.value);
+      const lastDayOfSvc = stillActiveEl.checked ? null : parseIsoDate(svcDateEl.value);
+      const asOfDate     = parseIsoDate(svcDateEl.value);
 
       const slHours  = parseFloat(slHoursEl.value);
       const slAsOf   = slAsOfEl.value ? parseIsoDate(slAsOfEl.value) : null;
@@ -1531,14 +1537,17 @@
       const eligible = series.filter(d => d.primaryPension !== null);
       statusLine.textContent = eligible.length === 0
         ? 'No eligible retirement dates found.' : '';
-      const hasSL = !(isNaN(slHours) || slHours <= 0) && slAsOf !== null;
-      drawChart(series, { hasSL });
+      const hasSL        = !(isNaN(slHours) || slHours <= 0) && slAsOf !== null;
+      const isSeparated  = !stillActiveEl.checked;
+      drawChart(series, { hasSL, isSeparated });
     }
 
     function runClear() {
       // Form inputs
-      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, slAsOfEl]
+      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcDateEl, manualAfcEl, slHoursEl, slAsOfEl]
         .forEach(el => { el.value = ''; });
+      stillActiveEl.checked = true;
+      syncDateLabel();
       slRateEl.value = '14';
 
       // PDF picker state
@@ -1566,9 +1575,6 @@
       prevPlanValue              = '';
       statusLine.textContent     = '';
 
-      // "As of" field visibility
-      syncAsOfVisibility();
-
       updateReloadLink();
       drawChart();
     }
@@ -1591,8 +1597,7 @@
 
       if (!planEl.value)  mark(planEl);
       if (!dobEl.value)   mark(dobEl);
-      // svc-as-of is only visible (and only the satisfying field) when lastDay is blank
-      if (!lastDayEl.value && !svcAsOfEl.value) mark(svcAsOfEl);
+      if (!svcDateEl.value) mark(svcDateEl);
       // AFC is only meaningful once a plan is chosen (fieldset enabled)
       if (!earningsFieldset.disabled && !(parseFloat(manualAfcEl.value) > 0)) mark(manualAfcEl);
       // sl-as-of required only when sick-leave hours are entered
@@ -1629,22 +1634,11 @@
       maybeCalculate();
     });
 
-    // ── "As of" visibility: shown when lastDay blank, hidden when filled ─
-    function syncAsOfVisibility() {
-      const hide = !!lastDayEl.value;
-      svcAsOfField.hidden = hide;
-      svcAsOfLabel.hidden = hide;
+    // ── Date field label tracks "still active" checkbox ──────────
+    function syncDateLabel() {
+      svcDateLabelEl.textContent = stillActiveEl.checked ? 'Service as of' : 'Last day of service';
     }
-
-    lastDayEl.addEventListener('input', syncAsOfVisibility);
-
-    // ── Last-day-of-service clear button ─────────────────────────
-    lastDayClearBtn.addEventListener('click', () => {
-      lastDayEl.value = '';
-      syncAsOfVisibility();
-      updateReloadLink();
-      maybeCalculate();
-    });
+    stillActiveEl.addEventListener('change', syncDateLabel);
 
     // ── Reload link ──────────────────────────────────────────────
     function buildReloadUrl() {
@@ -1654,8 +1648,8 @@
       add('dob',       dobEl);
       add('svcYears',  svcYearsEl);
       add('svcMonths', svcMonthsEl);
-      add('svcAsOf',   svcAsOfEl);
-      add('lastDay',   lastDayEl);
+      if (svcDateEl.value)
+        params.set(stillActiveEl.checked ? 'svcAsOf' : 'lastDay', svcDateEl.value);
       add('afc',       manualAfcEl);
       add('slHours',    slHoursEl);
       add('slAsOf',     slAsOfEl);
@@ -1670,9 +1664,10 @@
       reloadLinkBottom.href = url + '#reload-bar-bottom';
     }
 
-    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
+    [dobEl, svcYearsEl, svcMonthsEl, svcDateEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
       el.addEventListener('input', updateReloadLink)
     );
+    stillActiveEl.addEventListener('change', updateReloadLink);
     manualAfcEl.addEventListener('change', updateReloadLink);
 
     function commitAfc(e) {
@@ -1691,7 +1686,7 @@
     manualAfcEl.addEventListener('input',   commitAfc);
 
     // ── URL parameter pre-fill ────────────────────────────────────
-    // Supported params: plan, dob, svcYears, svcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate
+    // Supported params: plan, dob, svcYears, svcMonths, svcAsOf (still active) or lastDay (separated), afc, slHours, slAsOf, slRate
     // Example: ?plan=hybrid-post2012&dob=1975-06-15&svcYears=15&svcMonths=3&afc=4500
     {
       const p = new URLSearchParams(window.location.search);
@@ -1700,20 +1695,25 @@
       set(dobEl,       'dob');
       set(svcYearsEl,  'svcYears');
       set(svcMonthsEl, 'svcMonths');
-      set(svcAsOfEl,   'svcAsOf');
-      set(lastDayEl,   'lastDay');
+      if (p.has('lastDay')) {
+        svcDateEl.value = p.get('lastDay');
+        stillActiveEl.checked = false;
+      } else if (p.has('svcAsOf')) {
+        svcDateEl.value = p.get('svcAsOf');
+        stillActiveEl.checked = true;
+      }
       set(manualAfcEl, 'afc');
       set(slHoursEl,   'slHours');
       set(slAsOfEl,    'slAsOf');
       set(slRateEl,    'slRate');
       prevPlanValue             = planEl.value;
       earningsFieldset.disabled = !planEl.value;
-      syncAsOfVisibility();
+      syncDateLabel();
       updateReloadLink();
       if (canCalculate()) requestAnimationFrame(runCalculate);
     }
     // ── Chart ────────────────────────────────────────────────────
-    function drawChart(series = null, { hasSL = false } = {}) {
+    function drawChart(series = null, { hasSL = false, isSeparated = false } = {}) {
       const svg = d3.select('#chart-svg');
       const W   = svg.node().clientWidth;
       const H   = svg.node().clientHeight;
@@ -1952,11 +1952,13 @@
           if (dashArray) path.attr('stroke-dasharray', dashArray);
         };
 
-        if (hasSL) {
-          makeCurve(d => d.pensionRaisesProjectedSL, CHART.colorRaisesSLProjected, '4,3');
-          makeCurve(d => d.pensionRaisesCurrentSL,   CHART.colorRaisesSLCurrent);
+        if (!isSeparated) {
+          if (hasSL) {
+            makeCurve(d => d.pensionRaisesProjectedSL, CHART.colorRaisesSLProjected, '4,3');
+            makeCurve(d => d.pensionRaisesCurrentSL,   CHART.colorRaisesSLCurrent);
+          }
+          makeCurve(d => d.pensionWithRaises, CHART.colorRaises);
         }
-        makeCurve(d => d.pensionWithRaises,   CHART.colorRaises);
         makeCurve(d => d.pensionProjectedSL, CHART.colorSLProjected, '4,3');
         makeCurve(d => d.pensionCurrentSL,   CHART.colorSLCurrent);
         makeCurve(d => d.primaryPension,     CHART.colorPrimary);
@@ -1995,11 +1997,13 @@
             { type: 'line', color: CHART.colorSLCurrent,        dash: null,  label: '+ current sick leave'                 },
             { type: 'line', color: CHART.colorSLProjected,      dash: '4,3', label: '+ projected sick leave (no usage)'    },
           ] : []),
-          { break: true },
-          { type: 'line', color: CHART.colorRaises,              dash: null,  label: '+ projected raises'                  },
-          ...(hasSL ? [
-            { type: 'line', color: CHART.colorRaisesSLCurrent,   dash: null,  label: '+ raises + current sick leave'       },
-            { type: 'line', color: CHART.colorRaisesSLProjected, dash: '4,3', label: '+ raises + projected sick leave'     },
+          ...(!isSeparated ? [
+            { break: true },
+            { type: 'line', color: CHART.colorRaises,              dash: null,  label: '+ projected raises'                  },
+            ...(hasSL ? [
+              { type: 'line', color: CHART.colorRaisesSLCurrent,   dash: null,  label: '+ raises + current sick leave'       },
+              { type: 'line', color: CHART.colorRaisesSLProjected, dash: '4,3', label: '+ raises + projected sick leave'     },
+            ] : []),
           ] : []),
           { break: true },
           { type: 'line', color: CHART.colorCola,          dash: '4,3', label: 'COLA projection (on hover)'                },
@@ -2162,13 +2166,14 @@
               .attr('cx', px).attr('cy', hasSL ? yScale(pt.pensionProjectedSL) : 0)
               .attr('display', hasSL ? null : 'none');
             tip.select('.tip-dot-raises')
-              .attr('cx', px).attr('cy', yScale(pt.pensionWithRaises));
+              .attr('cx', isSeparated ? 0 : px).attr('cy', isSeparated ? 0 : yScale(pt.pensionWithRaises))
+              .attr('display', isSeparated ? 'none' : null);
             tip.select('.tip-dot-raises-sl-current')
-              .attr('cx', px).attr('cy', hasSL ? yScale(pt.pensionRaisesCurrentSL)   : 0)
-              .attr('display', hasSL ? null : 'none');
+              .attr('cx', px).attr('cy', !isSeparated && hasSL ? yScale(pt.pensionRaisesCurrentSL)   : 0)
+              .attr('display', !isSeparated && hasSL ? null : 'none');
             tip.select('.tip-dot-raises-sl-projected')
-              .attr('cx', px).attr('cy', hasSL ? yScale(pt.pensionRaisesProjectedSL) : 0)
-              .attr('display', hasSL ? null : 'none');
+              .attr('cx', px).attr('cy', !isSeparated && hasSL ? yScale(pt.pensionRaisesProjectedSL) : 0)
+              .attr('display', !isSeparated && hasSL ? null : 'none');
 
             // Pick the curve closest to the cursor's Y position
             const candidates = [
@@ -2177,10 +2182,12 @@
                 { pension: pt.pensionCurrentSL,          label: ' (+ cur. SL)',         color: CHART.colorSLCurrent         },
                 { pension: pt.pensionProjectedSL,        label: ' (+ proj. SL)',        color: CHART.colorSLProjected       },
               ] : []),
-              { pension: pt.pensionWithRaises,           label: ' (+ raises)',           color: CHART.colorRaises            },
-              ...(hasSL ? [
-                { pension: pt.pensionRaisesCurrentSL,   label: ' (+ raises + cur. SL)',  color: CHART.colorRaisesSLCurrent   },
-                { pension: pt.pensionRaisesProjectedSL, label: ' (+ raises + proj. SL)', color: CHART.colorRaisesSLProjected },
+              ...(!isSeparated ? [
+                { pension: pt.pensionWithRaises,           label: ' (+ raises)',           color: CHART.colorRaises            },
+                ...(hasSL ? [
+                  { pension: pt.pensionRaisesCurrentSL,   label: ' (+ raises + cur. SL)',  color: CHART.colorRaisesSLCurrent   },
+                  { pension: pt.pensionRaisesProjectedSL, label: ' (+ raises + proj. SL)', color: CHART.colorRaisesSLProjected },
+                ] : []),
               ] : []),
             ];
             const closest = candidates.reduce((best, c) =>

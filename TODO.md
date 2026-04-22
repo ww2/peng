@@ -1,17 +1,22 @@
 # ERS Pension Graph — Deferred Work
 
-## CAStigation
+## edge cases
 
-Need to prevent public access to this when I deploy it -- should I put it behind CAS,
-or limit it some other way?
+Need to add a checkbox to the 'Contractual adjustments' section, since those are unit-specific
+and I don't want to make them inputs instead of read-only.
 
-## Mixed service
+Maybe
 
-Members with service under more than one plan (e.g. Hybrid + Noncontributory)
-are not supported. The additive formula is known — each plan segment contributes
-`multiplier × (segmentMonths / 12) × segmentAFC × factor` — but the UI would
-need a way to enter multiple service/AFC blocks, and the eligibility logic would
-need to determine which plan's thresholds govern early/normal status.
+[x] Include negotiated raises
+
+Projected raises    202x-xx-xx x.xx%
+                    202x-xx-xx x.xx%
+                    202x-xx-xx x.xx%
+
+## hybrid plan support
+
+Need to redownload the originals, see what all changes need to be made for
+proper support.
 
 ## Survivor benefit options
 
