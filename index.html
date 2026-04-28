@@ -185,6 +185,26 @@
       background: #fafafa;
     }
 
+    /* ── Series table ── */
+    #series-table { margin: 0.6rem 0; font-size: 0.8rem; }
+    #series-table:empty { display: none; }
+    #series-table table { border-collapse: collapse; width: 100%; }
+    #series-table th, #series-table td {
+      border: 1px solid #ddd;
+      padding: 2px 8px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    #series-table th { background: #f5f5f5; font-weight: normal; }
+    #series-table th:first-child, #series-table td:first-child { text-align: left; }
+    #series-table td.empty { color: #aaa; }
+    #series-table td.fixed-msg {
+      text-align: center;
+      font-style: italic;
+      color: #666;
+      background: #fafafa;
+    }
+
     /* ── Debug panels (populated in Stage 2) ── */
     .fields-out { background: #f5f5f5; border: 1px solid #ccc; padding: 0.5rem;
                   margin: 0; font-size: 0.8rem; white-space: pre; }
@@ -259,9 +279,14 @@
       </div>
 
       <div class="form-row">
-        <label class="form-label" for="svc-date" id="svc-date-label">Service as of</label>
+        <label class="form-label" for="svc-as-of">Service as of</label>
+        <input type="date" id="svc-as-of">
+      </div>
+
+      <div class="form-row">
+        <label class="form-label" for="last-day">Last day of service</label>
         <div style="display:flex; align-items:baseline; gap:0.75rem;">
-          <input type="date" id="svc-date">
+          <input type="date" id="last-day" disabled>
           <label style="font-size:0.8rem; display:flex; align-items:center; gap:0.4rem; cursor:pointer; white-space:nowrap;">
             <input type="checkbox" id="still-active" checked> Still active
           </label>
@@ -300,7 +325,7 @@
 
       <div class="form-row" style="margin-bottom:0.25rem;">
         <label style="font-size:0.8rem; display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
-          <input type="checkbox" id="raises-na"> Projected raises do not apply
+          <input type="checkbox" id="raises-na"> <span id="raises-na-text">Projected raises do not apply</span>
         </label>
       </div>
 
@@ -377,6 +402,7 @@
 
   <!-- ── Chart ────────────────────────────────────────────────── -->
   <svg id="chart-svg"></svg>
+  <div id="series-table"></div>
   <p class="disclaimer-banner">This graph is based on the formulas and logic from published documents, but is completely unauthorized; for authorized estimates, use the official calculator (and for firm numbers, retire and see what happens).</p>
   <p id="reload-bar-bottom" class="reload-bar"><a id="reload-link-bottom" href="#">Reload</a></p>
 
@@ -412,10 +438,12 @@
     const dobEl            = document.getElementById('dob');
     const svcYearsEl       = document.getElementById('svc-years');
     const svcMonthsEl      = document.getElementById('svc-months');
-    const svcDateEl        = document.getElementById('svc-date');
-    const svcDateLabelEl   = document.getElementById('svc-date-label');
+    const svcAsOfEl        = document.getElementById('svc-as-of');
+    const lastDayEl        = document.getElementById('last-day');
     const stillActiveEl    = document.getElementById('still-active');
     const raisesNaEl       = document.getElementById('raises-na');
+    const raisesNaTextEl   = document.getElementById('raises-na-text');
+    const raisesTableRowEl = document.getElementById('raises-table-row');
     const manualAfcEl      = document.getElementById('manual-afc');
     const earningsFieldset = document.getElementById('group-earnings-input');
     const statusLine       = document.getElementById('status-line');
@@ -1069,11 +1097,14 @@
     // Returns afcMonthly grown by each scheduled raise, blended in linearly
     // over the plan's N-year averaging window. Naturally underestimates for
     // retirements within N years of a raise (covers the planning horizon).
-    function applyRaises(afcMonthly, retDate, N) {
+    // cutoff: optional last day of service — raises after cutoff don't apply,
+    // and the blend horizon is capped at cutoff (AFC stops growing at separation).
+    function applyRaises(afcMonthly, retDate, N, cutoff = null) {
+      const cap = cutoff ? new Date(Math.min(cutoff.getTime(), retDate.getTime())) : retDate;
       let afc = afcMonthly;
       for (const { date, rate } of RAISES) {
-        if (retDate <= date) continue;
-        const blend = Math.min(1, monthsBetween(date, retDate) / (N * 12));
+        if (cap <= date) continue;
+        const blend = Math.min(1, monthsBetween(date, cap) / (N * 12));
         afc *= (1 + rate * blend);
       }
       return afc;
@@ -1141,8 +1172,9 @@
         const arf       = primaryARF(offElig, plan, arfAge.year, arfAge.month);
         const primaryPension = offElig === 'ineligible' ? null
           : Math.floor(Math.round(afcMonthly * (svcYrs + svcMos / 12) * config.multiplier * arf * 100) / 100);
-        const raisedAfc = applyRaises(afcMonthly, retDate, config.N);
-        const pensionWithRaises = offElig === 'ineligible' ? null
+        const raisedAfc = applyRaises(afcMonthly, retDate, config.N, lastDayOfSvc);
+        const raisesActive = raisedAfc > afcMonthly;
+        const pensionWithRaises = (offElig === 'ineligible' || !raisesActive) ? null
           : Math.floor(Math.round(raisedAfc * (svcYrs + svcMos / 12) * config.multiplier * arf * 100) / 100);
 
         if (slHours != null && slAsOf != null && offElig !== 'ineligible') {
@@ -1157,10 +1189,12 @@
             Math.floor(Math.round(afcMonthly * (svc / 12) * config.multiplier * arf * 100) / 100);
           pensionCurrentSL   = calcPrimary(svcAtM + currentMo);
           pensionProjectedSL = calcPrimary(svcAtM + projectedMo);
-          const calcRaised = svc =>
-            Math.floor(Math.round(raisedAfc * (svc / 12) * config.multiplier * arf * 100) / 100);
-          pensionRaisesCurrentSL   = calcRaised(svcAtM + currentMo);
-          pensionRaisesProjectedSL = calcRaised(svcAtM + projectedMo);
+          if (raisesActive) {
+            const calcRaised = svc =>
+              Math.floor(Math.round(raisedAfc * (svc / 12) * config.multiplier * arf * 100) / 100);
+            pensionRaisesCurrentSL   = calcRaised(svcAtM + currentMo);
+            pensionRaisesProjectedSL = calcRaised(svcAtM + projectedMo);
+          }
         }
 
         const status   = isNormal ? 'normal' : isEarly ? 'early' : 'ineligible';
@@ -1171,10 +1205,11 @@
         if (firstNormalDate && retDate >= addMonths(firstNormalDate, 120)) break;
       }
 
-      // When separated, service and AFC are frozen so the pension is constant.
-      // The only remaining variation is the early-retirement ARF ramp — suppress
-      // it by snapping every eligible value to its maximum (normal-retirement amount).
-      if (lastDayOfSvc) {
+      // Already-separated members can no longer accrue service or AFC, and the
+      // ARF ramp is just a reminder that delaying collection is better — flatten
+      // it by snapping each eligible value to the normal-retirement maximum.
+      const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      if (lastDayOfSvc && lastDayOfSvc < todayMidnight) {
         const snapMax = key => {
           const vals = rows.map(r => r[key]).filter(v => v != null);
           if (!vals.length) return;
@@ -1184,6 +1219,27 @@
         snapMax('primaryPension');
         snapMax('pensionCurrentSL');
         snapMax('pensionProjectedSL');
+      } else if (lastDayOfSvc) {
+        // Future-dated lastDayOfSvc: treat it as both separation and collection
+        // start. Service/AFC/SL are already capped at lastDayOfSvc upstream, but
+        // ARF keeps improving with age — flatten that by snapping each row whose
+        // retDate > lastDayOfSvc to the value at the last retDate ≤ lastDayOfSvc.
+        const snapAfterLastDay = key => {
+          let lockValue = null;
+          for (const row of rows) {
+            if (row.retDate <= lastDayOfSvc) {
+              if (row[key] != null) lockValue = row[key];
+            } else if (row[key] != null && lockValue != null) {
+              row[key] = lockValue;
+            }
+          }
+        };
+        snapAfterLastDay('primaryPension');
+        snapAfterLastDay('pensionCurrentSL');
+        snapAfterLastDay('pensionProjectedSL');
+        snapAfterLastDay('pensionWithRaises');
+        snapAfterLastDay('pensionRaisesCurrentSL');
+        snapAfterLastDay('pensionRaisesProjectedSL');
       }
 
       return rows;
@@ -1510,26 +1566,82 @@
 
     // ── Reactive calculate logic ──────────────────────────────────
     function canCalculate() {
-      const group1Ok = !!(planEl.value && dobEl.value && svcDateEl.value);
+      const dateOk = !!svcAsOfEl.value && (stillActiveEl.checked || !!lastDayEl.value);
+      const group1Ok = !!(planEl.value && dobEl.value) && dateOk;
       const slHours = parseFloat(slHoursEl.value);
       const slOk = isNaN(slHours) || slHours <= 0 || !!slAsOfEl.value;
       return group1Ok && parseFloat(manualAfcEl.value) > 0 && slOk;
     }
 
     function maybeCalculate() {
-      if (canCalculate()) runCalculate(); else drawChart();
+      if (canCalculate()) runCalculate();
+      else { drawChart(); drawSeriesTable(null); }
     }
 
-    [dobEl, svcYearsEl, svcMonthsEl, svcDateEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
+    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
       el.addEventListener('input', maybeCalculate)
     );
+    stillActiveEl.addEventListener('change', syncLastDayState);
     stillActiveEl.addEventListener('change', maybeCalculate);
     raisesNaEl.addEventListener('change', maybeCalculate);
     manualAfcEl.addEventListener('change', maybeCalculate);
 
+    // Renders a table of the first 48 rows of the chart series with one column
+    // per visible curve. Columns mirror the chart's hasSL/showRaises gating so
+    // hidden curves don't appear as columns. Pass null/empty to clear.
+    const seriesTableEl = document.getElementById('series-table');
+    function drawSeriesTable(series, { hasSL = false, showRaises = false } = {}) {
+      if (!series || !series.length) { seriesTableEl.innerHTML = ''; return; }
+      const cols = [
+        { key: 'primaryPension',           label: 'estimated',       color: CHART.colorPrimary           },
+        ...(hasSL ? [
+          { key: 'pensionCurrentSL',       label: '+ cur. SL',       color: CHART.colorSLCurrent         },
+          { key: 'pensionProjectedSL',     label: '+ proj. SL',      color: CHART.colorSLProjected       },
+        ] : []),
+        ...(showRaises ? [
+          { key: 'pensionWithRaises',      label: '+ raises',        color: CHART.colorRaises            },
+          ...(hasSL ? [
+            { key: 'pensionRaisesCurrentSL',   label: '+ raises + cur. SL',  color: CHART.colorRaisesSLCurrent   },
+            { key: 'pensionRaisesProjectedSL', label: '+ raises + proj. SL', color: CHART.colorRaisesSLProjected },
+          ] : []),
+        ] : []),
+      ];
+      const fmtDate = d => d.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+      const fmtMoney = v => v == null ? null : '$' + Math.round(v).toLocaleString('en-US');
+      // Find the last row whose visible curve values differ from the prior row.
+      // After that index every row is identical, so we can collapse the tail
+      // into a single "values become fixed" message — provided we'd otherwise
+      // be repeating values within the 48-row cap.
+      const fingerprint = r => cols.map(c => r[c.key]).join('|');
+      let lastChangeIdx = 0;
+      let prevFp = fingerprint(series[0]);
+      for (let i = 1; i < series.length; i++) {
+        const fp = fingerprint(series[i]);
+        if (fp !== prevFp) lastChangeIdx = i;
+        prevFp = fp;
+      }
+      const CAP = 48;
+      const stabilized = lastChangeIdx < CAP - 1;
+      const rows = series.slice(0, stabilized ? lastChangeIdx + 1 : CAP);
+      const thead = '<tr><th>Date</th>'
+        + cols.map(c => `<th style="color:${c.color}">${c.label}</th>`).join('')
+        + '</tr>';
+      const tbody = rows.map(r => {
+        const cells = cols.map(c => {
+          const v = fmtMoney(r[c.key]);
+          return v == null ? '<td class="empty">—</td>' : `<td>${v}</td>`;
+        }).join('');
+        return `<tr><td>${fmtDate(r.retDate)}</td>${cells}</tr>`;
+      }).join('');
+      const tail = stabilized
+        ? `<tr><td class="fixed-msg" colspan="${cols.length + 1}">Values become fixed after the above date</td></tr>`
+        : '';
+      seriesTableEl.innerHTML = `<table><thead>${thead}</thead><tbody>${tbody}${tail}</tbody></table>`;
+    }
+
     function runCalculate() {
-      const lastDayOfSvc = stillActiveEl.checked ? null : parseIsoDate(svcDateEl.value);
-      const asOfDate     = parseIsoDate(svcDateEl.value);
+      const asOfDate     = parseIsoDate(svcAsOfEl.value);
+      const lastDayOfSvc = stillActiveEl.checked ? null : parseIsoDate(lastDayEl.value);
 
       const slHours  = parseFloat(slHoursEl.value);
       const slAsOf   = slAsOfEl.value ? parseIsoDate(slAsOfEl.value) : null;
@@ -1551,17 +1663,25 @@
       statusLine.textContent = eligible.length === 0
         ? 'No eligible retirement dates found.' : '';
       const hasSL        = !(isNaN(slHours) || slHours <= 0) && slAsOf !== null;
-      const isSeparated  = !stillActiveEl.checked;
+      const today        = new Date(); today.setHours(0, 0, 0, 0);
+      const isSeparated  = lastDayOfSvc !== null && lastDayOfSvc < today;
+      // If lastDay caps the raises horizon so that no scheduled raise ever
+      // blends into AFC, lock the "raises do not apply" checkbox on.
+      const noRaisesApply = lastDayOfSvc !== null && eligible.length > 0
+        && !series.some(d => d.pensionWithRaises !== null);
+      applyRaisesNALock(noRaisesApply);
       const raisesNA     = raisesNaEl.checked;
+      const showRaises   = !isSeparated && !raisesNA;
       drawChart(series, { hasSL, isSeparated, raisesNA });
+      drawSeriesTable(series, { hasSL, showRaises });
     }
 
     function runClear() {
       // Form inputs
-      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcDateEl, manualAfcEl, slHoursEl, slAsOfEl]
+      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, slAsOfEl]
         .forEach(el => { el.value = ''; });
       stillActiveEl.checked = true;
-      syncDateLabel();
+      syncLastDayState();
       slRateEl.value = '14';
 
       // PDF picker state
@@ -1591,6 +1711,7 @@
 
       updateReloadLink();
       drawChart();
+      drawSeriesTable(null);
     }
 
     clearBtn.addEventListener('click', runClear);
@@ -1611,7 +1732,8 @@
 
       if (!planEl.value)  mark(planEl);
       if (!dobEl.value)   mark(dobEl);
-      if (!svcDateEl.value) mark(svcDateEl);
+      if (!svcAsOfEl.value) mark(svcAsOfEl);
+      if (!stillActiveEl.checked && !lastDayEl.value) mark(lastDayEl);
       // AFC is only meaningful once a plan is chosen (fieldset enabled)
       if (!earningsFieldset.disabled && !(parseFloat(manualAfcEl.value) > 0)) mark(manualAfcEl);
       // sl-as-of required only when sick-leave hours are entered
@@ -1648,11 +1770,63 @@
       maybeCalculate();
     });
 
-    // ── Date field label tracks "still active" checkbox ──────────
-    function syncDateLabel() {
-      svcDateLabelEl.textContent = stillActiveEl.checked ? 'Service as of' : 'Last day of service';
+    // ── "Still active" toggle controls Last day of service field ────
+    function todayIso() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     }
-    stillActiveEl.addEventListener('change', syncDateLabel);
+
+    // When the last day of service falls before any scheduled raise can blend
+    // into AFC, the "raises do not apply" checkbox is forced on and disabled,
+    // and its label gains an explanatory suffix. The user's prior checkbox
+    // state is restored once the lock is released (e.g. on "Still active").
+    const RAISES_NA_BASE_LABEL = 'Projected raises do not apply';
+    const RAISES_NA_LASTDAY_SUFFIX = ' due to the Last day of service above';
+    function applyRaisesNALock(forced) {
+      if (forced && raisesNaEl.dataset.forced !== '1') {
+        raisesNaEl.dataset.prior  = raisesNaEl.checked ? '1' : '0';
+        raisesNaEl.dataset.forced = '1';
+        raisesNaEl.checked        = true;
+        raisesNaEl.disabled       = true;
+        raisesNaTextEl.textContent = RAISES_NA_BASE_LABEL + RAISES_NA_LASTDAY_SUFFIX;
+        raisesTableRowEl.hidden   = true;
+      } else if (!forced && raisesNaEl.dataset.forced === '1') {
+        raisesNaEl.checked        = raisesNaEl.dataset.prior === '1';
+        raisesNaEl.disabled       = false;
+        raisesNaTextEl.textContent = RAISES_NA_BASE_LABEL;
+        raisesTableRowEl.hidden   = raisesNaEl.checked;
+        delete raisesNaEl.dataset.forced;
+        delete raisesNaEl.dataset.prior;
+      }
+    }
+
+    function syncLastDayState() {
+      if (stillActiveEl.checked) {
+        lastDayEl.disabled = true;
+        lastDayEl.value    = '';
+        applyRaisesNALock(false);
+      } else {
+        lastDayEl.disabled = false;
+        if (!lastDayEl.value) lastDayEl.value = svcAsOfEl.value || todayIso();
+      }
+      lastDayEl.min = svcAsOfEl.value || '';
+    }
+    svcAsOfEl.addEventListener('input', () => {
+      lastDayEl.min = svcAsOfEl.value || '';
+    });
+
+    // Soft warning: last day of service should not precede "Service as of".
+    // Registered AFTER maybeCalculate listeners so this message wins on conflict.
+    const DATE_ORDER_MSG = 'Last day of service is before "Service as of" date.';
+    function checkDateOrdering() {
+      const bad = !!svcAsOfEl.value && !!lastDayEl.value && lastDayEl.value < svcAsOfEl.value;
+      lastDayEl.classList.toggle('input-error', bad);
+      if (bad) statusLine.textContent = DATE_ORDER_MSG;
+      else if (statusLine.textContent === DATE_ORDER_MSG) statusLine.textContent = '';
+    }
+    svcAsOfEl.addEventListener('input', checkDateOrdering);
+    lastDayEl.addEventListener('input', checkDateOrdering);
+    stillActiveEl.addEventListener('change', checkDateOrdering);
 
     // ── Reload link ──────────────────────────────────────────────
     function buildReloadUrl() {
@@ -1662,8 +1836,8 @@
       add('dob',       dobEl);
       add('svcYears',  svcYearsEl);
       add('svcMonths', svcMonthsEl);
-      if (svcDateEl.value)
-        params.set(stillActiveEl.checked ? 'svcAsOf' : 'lastDay', svcDateEl.value);
+      add('svcAsOf', svcAsOfEl);
+      if (!stillActiveEl.checked) add('lastDay', lastDayEl);
       add('afc',       manualAfcEl);
       add('slHours',    slHoursEl);
       add('slAsOf',     slAsOfEl);
@@ -1678,7 +1852,7 @@
       reloadLinkBottom.href = url + '#reload-bar-bottom';
     }
 
-    [dobEl, svcYearsEl, svcMonthsEl, svcDateEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
+    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
       el.addEventListener('input', updateReloadLink)
     );
     stillActiveEl.addEventListener('change', updateReloadLink);
@@ -1701,7 +1875,9 @@
     manualAfcEl.addEventListener('input',   commitAfc);
 
     // ── URL parameter pre-fill ────────────────────────────────────
-    // Supported params: plan, dob, svcYears, svcMonths, svcAsOf (still active) or lastDay (separated), afc, slHours, slAsOf, slRate
+    // Supported params: plan, dob, svcYears, svcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate
+    // svcAsOf is the reference date for the entered credited service. lastDay (if set) implies
+    // the user is separated or has a planned retirement date; "Still active" is unchecked.
     // Example: ?plan=hybrid-post2012&dob=1975-06-15&svcYears=15&svcMonths=3&afc=4500
     {
       const p = new URLSearchParams(window.location.search);
@@ -1710,12 +1886,12 @@
       set(dobEl,       'dob');
       set(svcYearsEl,  'svcYears');
       set(svcMonthsEl, 'svcMonths');
+      set(svcAsOfEl,   'svcAsOf');
+      // Backwards compat: pre-split URLs with only `lastDay` reused that date as the as-of figure.
+      if (p.has('lastDay') && !p.has('svcAsOf')) svcAsOfEl.value = p.get('lastDay');
       if (p.has('lastDay')) {
-        svcDateEl.value = p.get('lastDay');
+        lastDayEl.value     = p.get('lastDay');
         stillActiveEl.checked = false;
-      } else if (p.has('svcAsOf')) {
-        svcDateEl.value = p.get('svcAsOf');
-        stillActiveEl.checked = true;
       }
       set(manualAfcEl, 'afc');
       set(slHoursEl,   'slHours');
@@ -1723,7 +1899,7 @@
       set(slRateEl,    'slRate');
       prevPlanValue             = planEl.value;
       earningsFieldset.disabled = !planEl.value;
-      syncDateLabel();
+      syncLastDayState();
       updateReloadLink();
       if (canCalculate()) requestAnimationFrame(runCalculate);
     }
