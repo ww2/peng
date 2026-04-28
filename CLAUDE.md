@@ -146,5 +146,6 @@ For dual-threshold plans (hybrid-post2012, hybrid-pre2012, noncontributory), whi
 ## Reference Documents
 
 - `info/DESIGN.md` — design decisions and rationale (staircase curve, penalty reference age, official line architecture, AFC field UX, etc.)
-- PDF specs in `info/` — legal definitions of multipliers, eligibility thresholds, and AFC rules for each plan variant
+- `info/*.md` (excluding `DESIGN.md`) — **authoritative** plan specs: legal definitions of multipliers, eligibility thresholds, and AFC rules for each plan variant; treat these as the source of truth
+- `info/originals/` — archived PDF originals; **ignore these** — the `.md` files in `info/` are the converted, cross-checked versions
 - `ers/` — downloaded official ERS calculator source; `ers/_js/scripts/ers.data.js` and `ers.dataNew.js` are the source of the embedded ARF tables
