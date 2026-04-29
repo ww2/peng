@@ -42,7 +42,7 @@ All major features are complete:
 - Annual raise rate applied to AFC
 - COLA projection on hover
 - Hover tooltip with crosshair
-- Official ERS comparison line (red): ARF lookup tables ported from official calculator source, drawn alongside the blue curve for direct comparison
+- Official ERS comparison line (blue): ARF lookup tables ported from official calculator source, drawn alongside the blue curve for direct comparison
 
 Deferred items: mixed-service (multi-plan) members, survivor benefit options (see `TODO.md`).
 
@@ -141,7 +141,7 @@ For dual-threshold plans (hybrid-post2012, hybrid-pre2012, noncontributory), whi
 - **Shaded regions** (left of eligible date):
   - Dark grey (`#e8e8e8`): not yet vested
   - Light grey (`#f5f5f5`): vested, not yet eligible to collect
-- **Hover tooltip**: vertical + horizontal crosshair; dots on all active curves; label snaps to the curve closest to cursor Y; COLA projection curve (dashed orange) extends 20 years from the hovered point. Label format: `"May 2031 — $2,847/mo"` (or `"(+ cur. SL)"` / `"(+ proj. SL)"` / `"(official)"` suffix when applicable).
+- **Hover tooltip**: vertical + horizontal crosshair; dots on all active curves; label snaps to the curve closest to cursor Y; COLA projection curve (dashed green) extends 20 years from the hovered point. Label format: `"May 2031 — $2,847/mo"` (or `"(+ cur. SL)"` / `"(+ proj. SL)"` / `"(official)"` suffix when applicable).
 
 ## Reference Documents
 

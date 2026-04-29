@@ -186,8 +186,19 @@
     }
 
     /* ── Series table ── */
-    #series-table { margin: 0.6rem 0; font-size: 0.8rem; }
-    #series-table:empty { display: none; }
+    #series-details { margin: 0.6rem 0; }
+    #series-details:has(#series-table:empty) { display: none; }
+    #series-details > summary {
+      cursor: pointer; font-size: 0.9rem; user-select: none;
+      list-style: none;
+    }
+    #series-details > summary::-webkit-details-marker { display: none; }
+    #series-details > summary::before {
+      content: '\25B6'; display: inline-block; width: 1em;
+      transition: transform 0.15s; color: #666;
+    }
+    #series-details[open] > summary::before { transform: rotate(90deg); }
+    #series-table { font-size: 0.8rem; }
     #series-table table { border-collapse: collapse; width: 100%; }
     #series-table th, #series-table td {
       border: 1px solid #ddd;
@@ -402,7 +413,10 @@
 
   <!-- ── Chart ────────────────────────────────────────────────── -->
   <svg id="chart-svg"></svg>
-  <div id="series-table"></div>
+  <details id="series-details">
+    <summary>Estimation table</summary>
+    <div id="series-table"></div>
+  </details>
   <p class="disclaimer-banner">This graph is based on the formulas and logic from published documents, but is completely unauthorized; for authorized estimates, use the official calculator (and for firm numbers, retire and see what happens).</p>
   <p id="reload-bar-bottom" class="reload-bar"><a id="reload-link-bottom" href="#">Reload</a></p>
 
@@ -418,6 +432,7 @@
       font           : 'monospace',
       colorNotVested : '#e8e8e8',
       colorIneligible: '#f5f5f5',
+      colorEarlyPenalty: '#f0f0f0',
       colorGrid      : '#e0e0e0',
       colorAxis      : '#555',
       colorLabel     : '#333',
@@ -1220,26 +1235,33 @@
         snapMax('pensionCurrentSL');
         snapMax('pensionProjectedSL');
       } else if (lastDayOfSvc) {
-        // Future-dated lastDayOfSvc: treat it as both separation and collection
-        // start. Service/AFC/SL are already capped at lastDayOfSvc upstream, but
-        // ARF keeps improving with age — flatten that by snapping each row whose
-        // retDate > lastDayOfSvc to the value at the last retDate ≤ lastDayOfSvc.
-        const snapAfterLastDay = key => {
+        // Future-dated lastDayOfSvc: treat it as a committed separation date.
+        // The Nov-1-style retirement date (first retDate > lastDayOfSvc) is the
+        // canonical pension for that COB; pre-COB rows model retiring earlier
+        // (with less service) and post-COB rows model delaying collection (with
+        // a smaller ARF penalty), neither of which the user is choosing — so
+        // lock every eligible row to the first-row-past-COB value.
+        // (ERS rule: retirement date is the 1st of the month and cannot equal
+        // the COB date, so a COB of e.g. Oct 31 maps to a Nov 1 retirement date.)
+        const snapToCommittedCob = key => {
           let lockValue = null;
           for (const row of rows) {
-            if (row.retDate <= lastDayOfSvc) {
-              if (row[key] != null) lockValue = row[key];
-            } else if (row[key] != null && lockValue != null) {
-              row[key] = lockValue;
+            if (row.retDate > lastDayOfSvc && row[key] != null) {
+              lockValue = row[key];
+              break;
             }
           }
+          if (lockValue == null) return;
+          for (const row of rows) {
+            if (row[key] != null) row[key] = lockValue;
+          }
         };
-        snapAfterLastDay('primaryPension');
-        snapAfterLastDay('pensionCurrentSL');
-        snapAfterLastDay('pensionProjectedSL');
-        snapAfterLastDay('pensionWithRaises');
-        snapAfterLastDay('pensionRaisesCurrentSL');
-        snapAfterLastDay('pensionRaisesProjectedSL');
+        snapToCommittedCob('primaryPension');
+        snapToCommittedCob('pensionCurrentSL');
+        snapToCommittedCob('pensionProjectedSL');
+        snapToCommittedCob('pensionWithRaises');
+        snapToCommittedCob('pensionRaisesCurrentSL');
+        snapToCommittedCob('pensionRaisesProjectedSL');
       }
 
       return rows;
@@ -2002,8 +2024,23 @@
       if (series && series.length) {
         const firstVested   = series.find(d => d.isVested);
         const firstEligible = series.find(d => d.primaryPension !== null);
+        const firstNormal   = series.find(d => d.status === 'normal');
         const vestedX   = firstVested   ? xScale(firstVested.retDate)   : iW;
         const eligibleX = firstEligible ? xScale(firstEligible.retDate) : iW;
+        const normalX   = firstNormal   ? xScale(firstNormal.retDate)   : iW;
+
+        // Rotated -90° label, pinned so its top edge sits topPad below the
+        // top of the plot — keeps the label clear of the pension curves which
+        // tend to occupy the lower-right of the plot area.
+        const placeRegionLabel = (text, midX, topPad = 8) => {
+          const t = g.append('text')
+            .attr('text-anchor', 'middle')
+            .attr('font-family', CHART.font).attr('font-size', '0.75rem')
+            .attr('fill', CHART.colorMinor)
+            .text(text);
+          const w = t.node().getBBox().width;
+          t.attr('transform', `translate(${midX},${topPad + w / 2}) rotate(-90)`);
+        };
 
         // Not yet vested
         if (vestedX > 0) {
@@ -2011,14 +2048,7 @@
             .attr('x', 0).attr('y', 0)
             .attr('width', vestedX).attr('height', iH)
             .attr('fill', CHART.colorNotVested);
-          if (vestedX > 30) {
-            g.append('text')
-              .attr('transform', `translate(${vestedX / 2},${iH / 2}) rotate(-90)`)
-              .attr('text-anchor', 'middle')
-              .attr('font-family', CHART.font).attr('font-size', '0.75rem')
-              .attr('fill', CHART.colorMinor)
-              .text('Not yet vested');
-          }
+          if (vestedX > 30) placeRegionLabel('Not yet vested', vestedX / 2);
         }
 
         // Vested but not yet eligible to collect
@@ -2027,15 +2057,18 @@
             .attr('x', vestedX).attr('y', 0)
             .attr('width', eligibleX - vestedX).attr('height', iH)
             .attr('fill', CHART.colorIneligible);
-          if (eligibleX - vestedX > 30) {
-            const midX = vestedX + (eligibleX - vestedX) / 2;
-            g.append('text')
-              .attr('transform', `translate(${midX},${iH / 2}) rotate(-90)`)
-              .attr('text-anchor', 'middle')
-              .attr('font-family', CHART.font).attr('font-size', '0.75rem')
-              .attr('fill', CHART.colorMinor)
-              .text('Vested, not yet eligible');
-          }
+          if (eligibleX - vestedX > 30)
+            placeRegionLabel('Vested, not yet eligible', vestedX + (eligibleX - vestedX) / 2);
+        }
+
+        // Eligible but early — penalty applies
+        if (normalX > eligibleX) {
+          g.append('rect')
+            .attr('x', eligibleX).attr('y', 0)
+            .attr('width', normalX - eligibleX).attr('height', iH)
+            .attr('fill', CHART.colorEarlyPenalty);
+          if (normalX - eligibleX > 30)
+            placeRegionLabel('Early retirement penalty', eligibleX + (normalX - eligibleX) / 2);
         }
       }
 
@@ -2181,9 +2214,11 @@
       if (series && eligible.length) {
         const hasNotVested     = series.some(d => !d.isVested);
         const hasVestedNotElig = series.some(d => d.isVested && d.primaryPension === null);
+        const hasEarlyPenalty  = series.some(d => d.status === 'early');
         const entries = [
-          ...(hasNotVested     ? [{ type: 'rect', fill: CHART.colorNotVested,   label: 'Not yet vested'                      }] : []),
-          ...(hasVestedNotElig ? [{ type: 'rect', fill: CHART.colorIneligible,  label: 'Vested, not yet eligible'            }] : []),
+          ...(hasNotVested     ? [{ type: 'rect', fill: CHART.colorNotVested,     label: 'Not yet vested'                      }] : []),
+          ...(hasVestedNotElig ? [{ type: 'rect', fill: CHART.colorIneligible,    label: 'Vested, not yet eligible'            }] : []),
+          ...(hasEarlyPenalty  ? [{ type: 'rect', fill: CHART.colorEarlyPenalty,  label: 'Early retirement penalty'            }] : []),
           { type: 'line', color: CHART.colorPrimary,      dash: null,  label: 'estimated pension'                                   },
           ...(hasSL ? [
             { type: 'line', color: CHART.colorSLCurrent,        dash: null,  label: '+ current sick leave'                 },
@@ -2284,7 +2319,7 @@
       if (eligible.length) {
         const bisect   = d3.bisector(d => d.retDate).left;
         const colaRate = PLAN_CONFIGS[planEl.value]?.colaRate ?? 0;
-        const colaLine = d3.line().x(p => p.x).y(p => p.y);
+        const colaLine = d3.line().curve(d3.curveStepAfter).x(p => p.x).y(p => p.y);
 
         const tip = g.append('g').attr('display', 'none');
 
@@ -2387,15 +2422,22 @@
             );
             const cy = yScale(closest.pension);
 
-            // COLA projection anchored to the closest curve
-            const colaPoints = [];
-            for (let m = 0; m <= 240; m++) {
-              const d = addMonths(pt.retDate, m);
-              colaPoints.push({
-                x: xScale(d),
-                y: yScale(closest.pension * Math.pow(1 + colaRate, m / 12)),
-              });
+            // COLA projection anchored to the closest curve.
+            // Per ERS docs: simple (not compounded) annual increase applied to
+            // the original pension on each July 1, beginning July 1 of the
+            // calendar year following retirement.
+            const colaPoints   = [];
+            const original     = closest.pension;
+            const endDate      = addMonths(pt.retDate, 240);
+            colaPoints.push({ x: xScale(pt.retDate), y: yScale(original) });
+            let k       = 0;
+            let nextJul = new Date(pt.retDate.getFullYear() + 1, 6, 1);
+            while (nextJul <= endDate) {
+              k++;
+              colaPoints.push({ x: xScale(nextJul), y: yScale(original * (1 + k * colaRate)) });
+              nextJul = new Date(nextJul.getFullYear() + 1, 6, 1);
             }
+            colaPoints.push({ x: xScale(endDate), y: yScale(original * (1 + k * colaRate)) });
             colaPath.attr('d', colaLine(colaPoints));
 
             tip.select('.tip-v').attr('x1', px).attr('x2', px);
@@ -2406,12 +2448,15 @@
             tipText.append('tspan').attr('dy', 0).attr('fill', closest.color)
               .text(`${MONTHS[pt.retDate.getMonth()]} ${pt.retDate.getFullYear()} — $${fmt(closest.pension)}/mo${closest.label}`);
 
+            // Pin the label to the top-left of the plot area so it never
+            // overlaps the COLA staircase or any pension curve. The crosshair
+            // dots already identify the hovered point on each curve.
             const pad = 6;
             const bb  = tipText.node().getBBox();
             const lw  = bb.width  + pad * 2;
             const lh  = bb.height + pad * 2;
-            const lx  = px + 12 + lw > iW ? px - 12 - lw : px + 12;
-            const ly  = Math.max(0, Math.min(iH - lh, cy - lh / 2));
+            const lx  = (iW - lw) / 2;
+            const ly  = 0;
 
             tipRect.attr('x', lx).attr('y', ly).attr('width', lw).attr('height', lh);
             tipText.attr('x', lx + pad).attr('y', ly + pad);
