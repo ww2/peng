@@ -43,7 +43,18 @@
       font-size: 0.8rem;
     }
 
-    #picker-path { color: #999; }
+    #picker-path {
+      color: #999;
+      font-family: monospace;
+      font-size: 0.8rem;
+      display: block;
+      width: 100%;
+      margin-top: 0.25rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #picker-path:empty { display: none; }
     .form-row > select,
     .form-row > input,
     .input-row input {
@@ -378,13 +389,14 @@
     <div id="group-earnings-input-picker">
       <div id="picker-controls">
         <div class="form-row">
-          <label class="form-label" for="picker-btn">Paystub directory<span id="picker-path"></span></label>
+          <label class="form-label" for="picker-btn">Paystub directory</label>
           <div>
             <button id="picker-btn" type="button">Choose directory…</button>
             <input type="file" id="picker" webkitdirectory accept=".pdf" style="display:none">
             <button id="cancel-btn" type="button" style="display:none">Cancel</button>
           </div>
         </div>
+        <span id="picker-path"></span>
         <div id="afc-computed"></div>
         <div id="afc-date-range"></div>
         <div id="regular-earnings"></div>
