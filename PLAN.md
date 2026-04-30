@@ -120,34 +120,24 @@ Tests: hybrid-post2012, 8 hybrid yrs + 2 NC yrs (total 10) → vested (10-yr thr
 Status: Not Started
 
 ## Stage 7: Plan-change UX
-Goal: when user switches plan dropdown, NC fields' visibility follows the new plan; if NC values are non-zero and they're switching to a non-hybrid plan, prompt with the same confirmation pattern as the AFC plan-change prompt (`info/DESIGN.md:44-52`).
-Success: switching hybrid → noncontributory with NC=5 prompts "this will clear your noncontributory service entry — continue?"; switching hybrid → hybrid (other tier) preserves NC values.
+Goal: NC fields' visibility follows the derived plan key — visible iff `derivePlanKey(planEl.value, memDateEl.value)` starts with `hybrid-`. When NC values are non-zero and the dropdown changes to a non-hybrid plan, prompt with the same confirmation pattern as the AFC plan-change prompt (`info/DESIGN.md:44-52`). Editing `memDate` within hybrid (which only flips the tier, not the plan type) preserves NC values silently — the AFC tier-cross confirm at `index.html:1888+` still fires for AFC recompute, but NC values are untouched.
+Success: dropdown hybrid → noncontributory with NC=5 prompts "this will clear your noncontributory service entry — continue?"; editing memDate within hybrid (e.g., 2015 → 2010) preserves NC values.
 Tests: manual UX check.
 Status: Not Started
 
-## Stage 8: Add Membership-date input field
-Goal: optional date input "ERS membership date", placed near DOB; URL param `memDate`. Used solely to detect the pre-1971 dual-method AFC trigger today; could also drive future tier-derivation work (out of scope here).
-Success: field round-trips through URL; blank value means "unknown / post-1971" and preserves current behavior; entering a date before 1971-01-01 enables Stage 9's dual-method path.
-Tests:
-- Blank `memDate` on every plan → byte-identical AFC and curves vs current build (regression).
-- `memDate=1968-04-01` on post-2012 plans → ignored (post-2012 eligibility precludes pre-1971 membership), with a small UI note that the dual-method only applies to pre-2012 plans.
-- `memDate=1968-04-01` on hybrid-pre2012 / contributory-pre2012 → triggers Stage 9 logic.
-- URL round-trip: `?plan=contributory-pre2012&memDate=1968-04-01` → form populates; reload-bar URL preserves it.
-Status: Not Started
-
-## Stage 9: Pre-1971 dual-method AFC computation
-Goal: when `memDate < 1971-01-01` and plan is pre-2012, compute AFC as `max(methodA, methodB)` where Method A is the existing top-3-gross-excluding-lump-sum-vacation and Method B is top-5-all-earnings-including-lump-sum-vacation.
+## Stage 8: Pre-1971 dual-method AFC computation
+Goal: when `memDate < 1971-01-01` and the derived plan key is `hybrid-pre2012`, `contributory-pre2012`, or `noncontributory`, compute AFC as `max(methodA, methodB)` where Method A is the existing top-3-gross-excluding-lump-sum-vacation and Method B is top-5-all-earnings-including-lump-sum-vacation.
 
 Concrete changes:
-- **Identify lump-sum vacation category.** Audit real paystub data and any earnings-category lists in `index.html` (the `KNOWN` list at `:824-836` and `IGNORED` at `:838-844`); add the exact key name as a constant `LUMP_SUM_VACATION` so both methods reference it consistently. If the category isn't reliably present in stub data, surface a warning in the dropped/uncovered output rather than silently misclassifying.
-- **Extend `scoreStub(stub, mode)`** (`index.html:1259-1263`) with two new modes:
+- **Identify lump-sum vacation category.** Audit real paystub data and any earnings-category lists in `index.html` (the `KNOWN` and `IGNORED` lists in the paystub section); add the exact key name as a constant `LUMP_SUM_VACATION` so both methods reference it consistently. If the category isn't reliably present in stub data, surface a warning in the dropped/uncovered output rather than silently misclassifying.
+- **Extend `scoreStub(stub, mode)`** (`index.html:1386`) with two new modes:
   - `'totalExclVacation'` — sum of all non-IGNORED earnings minus `LUMP_SUM_VACATION` (Method A)
   - `'totalInclVacation'` — sum of all non-IGNORED earnings including `LUMP_SUM_VACATION` (Method B)
   Existing `'regular'` and `'total'` modes remain for plans that don't trigger the dual-method.
-- **`computeAndFillAfc()`** (`index.html:1340-1351`): when the pre-1971 trigger fires, run `solveDP(scoreA, 3)` and `solveDP(scoreB, 5)`, take the larger monthly AFC, and write that into `manualAfcEl`. Surface in the windows-section render which method won and the runner-up's AFC, so the user can see the comparison.
-- **Manual-AFC path:** if the user enters AFC by hand without paystubs and `memDate` is pre-1971, render an inline note: "Pre-1971 members are entitled to the higher of two AFC methods — provide paystubs to compute both, or ensure your manual entry already reflects the higher." No automatic computation possible without stubs.
-- **Plan-change confirm:** the existing AFC plan-change confirmation flow naturally extends — if `memDate` is pre-1971, the recompute uses the dual-method.
-- **Plan compatibility:** the trigger is gated on `plan !== 'hybrid-post2012' && plan !== 'contributory-post2012'` — i.e., it fires for hybrid-pre2012, contributory-pre2012, and noncontributory (whose spec at `info/Noncontributory200912.md:119-125` also extends the dual-method to pre-1971 members). Post-2012 plans ignore `memDate` entirely; the Stage 8 UI note mentions this so it isn't surprising.
+- **`computeAndFillAfc()`** (`index.html:1467`): when the pre-1971 trigger fires, run `solveDP(scoreA, 3)` and `solveDP(scoreB, 5)`, take the larger monthly AFC, and write that into `manualAfcEl`. Surface in the windows-section render which method won and the runner-up's AFC, so the user can see the comparison.
+- **Manual-AFC path:** if the user enters AFC by hand without paystubs and `memDate` is pre-1971 on a triggering plan, render an inline note: "Pre-1971 members are entitled to the higher of two AFC methods — provide paystubs to compute both, or ensure your manual entry already reflects the higher." No automatic computation possible without stubs.
+- **Plan-change / memDate-change confirm:** the existing AFC recompute confirmation flow (plan-change at `index.html:1862+`, memDate-change at `:1888+`) naturally covers this — if the new derivation triggers the pre-1971 path, the recompute uses the dual-method.
+- **Plan compatibility:** the trigger fires when `derivePlanKey(planEl.value, memDateEl.value)` is `hybrid-pre2012`, `contributory-pre2012`, or `noncontributory`, AND `memDate < 1971-01-01`. Hybrid/contributory members with `memDate >= 2012-07-01` derive to post-2012 keys, naturally excluding them — and a `memDate >= 2012-07-01` is always >= 1971-01-01 anyway, so there's no overlap. The noncontributory spec at `info/Noncontributory200912.md:119-125` extends the dual-method to its pre-1971 members.
 
 Success: pre-1971 stubs produce the higher of the two AFCs in the AFC field; non-pre-1971 stubs produce the same AFC as the current build.
 
@@ -155,15 +145,14 @@ Tests:
 - Pre-1971 hybrid-pre2012 case where Method B (5-yr including vacation) is higher → AFC matches Method B; runner-up shown alongside.
 - Pre-1971 contributory-pre2012 case where Method A (3-yr excluding vacation) is higher → AFC matches Method A.
 - Pre-1971 noncontributory case → dual-method also runs (per spec wording, applies to all plans whose members could have joined pre-1971).
-- Post-1971 pre-2012 case → AFC is byte-identical to current build (Method A only, no comparison performed).
-- Post-2012 case with `memDate` set to 1968 → `memDate` ignored, AFC matches current build, UI note surfaces.
+- Post-1971 pre-2012 case (e.g., `memDate=1985-01-01`) → AFC is byte-identical to current build (Method A only, no comparison performed).
 - Stub set with no recognizable lump-sum-vacation category → Method B silently equals current `'total'` Method; warning logged.
 - Cross-check: the official ERS calculator does **not** appear to expose a pre-1971 dual-method (paystub data isn't its input), so the red-curve comparison does not exercise this path. Verify peng's red curve continues to match the official tool for non-pre-1971 cases.
 
 Status: Not Started
 
-## Stage 10: Documentation updates
-Goal: update `CLAUDE.md` (Key Logic section, URL params list including `memDate`, `ncSvcYears`, `ncSvcMonths`); update `info/DESIGN.md` with two new subsections — "NC mixed-service" and "Pre-1971 AFC dual-method" — citing specs; remove/update the "hybrid plan support" item in `TODO.md`.
+## Stage 9: Documentation updates
+Goal: update `CLAUDE.md` (Key Logic section, URL params list — `memDate` is already there post-PREPLAN; add `ncSvcYears`, `ncSvcMonths`); update `info/DESIGN.md` with two new subsections — "NC mixed-service" and "Pre-1971 AFC dual-method" — citing specs; remove/update the "hybrid plan support" item in `TODO.md`.
 Success: docs reflect current behavior; reading `CLAUDE.md` cold conveys both the split-multiplier rule and the pre-1971 dual-method trigger.
 Status: Not Started
 
@@ -174,4 +163,4 @@ Status: Not Started
 - Survivor / option A/B/C and 1-5 ladders (deferred; ARF data unavailable).
 - Designated-Category / POFF support (no current users; not in `PLAN_CONFIGS`).
 - Multi-plan members beyond hybrid+NC (e.g., contributory + NC) — not requested; spec docs do not describe a contributory+NC blend.
-- Auto-deriving Tier from membership date (today the user picks pre/post-2012 directly via the plan dropdown; this is fine for the calculator's audience). Stage 8's `memDate` field is purely an input for the pre-1971 trigger and does not change tier selection.
+- Auto-deriving plan **type** (hybrid vs. contrib vs. noncontrib) from membership date and other metadata — would require a much richer rules engine (employment history, job class, statute changes); the user picks plan type directly from the 3-option dropdown. Tier (post2012 vs pre2012) **is** derived automatically from `memDate` via PREPLAN's `derivePlanKey`.

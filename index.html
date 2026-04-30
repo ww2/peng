@@ -279,7 +279,7 @@
   <h1>Estimated Pension Graph</h1>
   <p class="disclaimer-banner">This graph is based on the formulas and logic from published documents, but is completely unauthorized; for authorized estimates, use the official calculator (and for firm numbers, retire and see what happens).</p>
   <div id="url-error-banner" class="url-error-banner" hidden>
-    <strong>Issues with URL parameters:</strong>
+    <strong>Issues:</strong>
     <ul></ul>
   </div>
   <p id="reload-bar" class="reload-bar"><a id="reload-link" href="#">Reload</a></p>
@@ -512,6 +512,8 @@
     const debugDetails     = document.getElementById('debug-details');
     const debugBody        = document.getElementById('debug-body');
     const debugPanelEl     = document.getElementById('debug-panel');
+    const urlErrorBanner   = document.getElementById('url-error-banner');
+    const urlErrorBannerList = urlErrorBanner.querySelector('ul');
 
     // ── Plan configs ─────────────────────────────────────────────
     const PLAN_CONFIGS = {
@@ -1637,9 +1639,46 @@
     let prevMemDateValue = '';
 
     // ── Reactive calculate logic ──────────────────────────────────
+    // Range-checks memDate. Hard-invalid (future date) blocks calculation;
+    // soft-invalid (before DOB+18) only flags the field. Returns false when
+    // the value is hard-invalid. Leaves the class alone when the field is
+    // empty so URL-pre-fill highlights from Stage 4 survive initial render.
+    let memDateBannerLi = null;
+    function setMemDateBannerEntry(msg) {
+      if (msg) {
+        if (!memDateBannerLi) {
+          memDateBannerLi = document.createElement('li');
+          urlErrorBannerList.appendChild(memDateBannerLi);
+        }
+        memDateBannerLi.textContent = msg;
+        urlErrorBanner.hidden = false;
+      } else if (memDateBannerLi) {
+        memDateBannerLi.remove();
+        memDateBannerLi = null;
+        if (!urlErrorBannerList.children.length) urlErrorBanner.hidden = true;
+      }
+    }
+    function validateMemDate() {
+      if (!memDateEl.value) { setMemDateBannerEntry(null); return true; }
+      const md     = parseIsoDate(memDateEl.value);
+      const today  = new Date(); today.setHours(0, 0, 0, 0);
+      const future = md > today;
+      const dob    = dobEl.value ? parseIsoDate(dobEl.value) : null;
+      const beforeDob  = dob && md < dob;
+      const tooYoung   = dob && !beforeDob && md < addMonths(dob, 18 * 12);
+      let msg = null;
+      if (future) msg = `membership date ${memDateEl.value} is in the future`;
+      else if (beforeDob) msg = `membership date ${memDateEl.value} is before date of birth ${dobEl.value}`;
+      else if (tooYoung)  msg = `membership date ${memDateEl.value} is before age 18 (DOB ${dobEl.value})`;
+      memDateEl.classList.toggle('input-error', !!msg);
+      setMemDateBannerEntry(msg);
+      return !future;
+    }
+
     function canCalculate() {
       const dateOk = !!svcAsOfEl.value && (stillActiveEl.checked || !!lastDayEl.value);
-      const group1Ok = !!(planEl.value && dobEl.value && memDateEl.value) && dateOk;
+      const memOk = validateMemDate();
+      const group1Ok = !!(planEl.value && dobEl.value && memDateEl.value) && dateOk && memOk;
       const slHours = parseFloat(slHoursEl.value);
       const slOk = isNaN(slHours) || slHours <= 0 || !!slAsOfEl.value;
       return group1Ok && parseFloat(manualAfcEl.value) > 0 && slOk;
@@ -1784,6 +1823,8 @@
       prevMemDateValue           = '';
       statusLine.textContent     = '';
       graphBtn.disabled          = true;
+      memDateEl.classList.remove('input-error');
+      setMemDateBannerEntry(null);
 
       updateReloadLink();
       drawChart();
@@ -1994,8 +2035,8 @@
       const SUPPORTED_PARAMS = ['plan','dob','memDate','svcYears','svcMonths','svcAsOf','lastDay','afc','slHours','slAsOf','slRate'];
       const PLAN_VALUES = ['hybrid','contributory','noncontributory'];
       const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-      const banner = document.getElementById('url-error-banner');
-      const bannerList = banner.querySelector('ul');
+      const banner = urlErrorBanner;
+      const bannerList = urlErrorBannerList;
 
       function isValidIsoDate(s) {
         if (!ISO_DATE_RE.test(s)) return false;
@@ -2094,6 +2135,10 @@
       earningsFieldset.disabled = !planEl.value;
       syncLastDayState();
       updateReloadLink();
+      // Registered AFTER Stage-4 addError clear listeners so the range-
+      // validation class state wins on the first input event after a
+      // bad-URL highlight gets cleared.
+      memDateEl.addEventListener('input', validateMemDate);
       const ok = canCalculate();
       graphBtn.disabled = !ok;
       if (ok) requestAnimationFrame(runCalculate);
