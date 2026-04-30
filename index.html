@@ -172,6 +172,19 @@
 
     .input-error { outline: 2px solid #c00 !important; }
 
+    /* ── URL parameter error banner ── */
+    .url-error-banner {
+      font-size: 0.85rem;
+      color: #c00;
+      background: #fff0f0;
+      border: 1px solid #c00;
+      border-radius: 3px;
+      padding: 0.4rem 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    .url-error-banner ul { margin: 0.25rem 0 0 1.25rem; padding: 0; }
+    .url-error-banner li { margin: 0.1rem 0; }
+
     #status-line { font-size: 0.85rem; color: #c00; }
     #status-line:empty { display: none; }
 
@@ -265,6 +278,10 @@
 <body>
   <h1>Estimated Pension Graph</h1>
   <p class="disclaimer-banner">This graph is based on the formulas and logic from published documents, but is completely unauthorized; for authorized estimates, use the official calculator (and for firm numbers, retire and see what happens).</p>
+  <div id="url-error-banner" class="url-error-banner" hidden>
+    <strong>Issues with URL parameters:</strong>
+    <ul></ul>
+  </div>
   <p id="reload-bar" class="reload-bar"><a id="reload-link" href="#">Reload</a></p>
 
   <!-- ── Group 1: Your information ───────────────────────────── -->
@@ -276,17 +293,20 @@
         <label class="form-label" for="plan">Plan</label>
         <select id="plan">
           <option value="">— select —</option>
-          <option value="hybrid-post2012">Hybrid (joined July 2012 or later)</option>
-          <option value="hybrid-pre2012">Hybrid (joined before July 2012)</option>
-          <option value="contributory-post2012">Contributory (joined July 2012 or later)</option>
-          <option value="contributory-pre2012">Contributory (joined before July 2012)</option>
-          <option value="noncontributory">Noncontributory</option>
+          <option value="hybrid">Hybrid plan</option>
+          <option value="contributory">Contributory plan</option>
+          <option value="noncontributory">Noncontributory plan</option>
         </select>
       </div>
 
       <div class="form-row">
         <label class="form-label" for="dob">Date of birth</label>
         <input type="date" id="dob">
+      </div>
+
+      <div class="form-row">
+        <label class="form-label" for="mem-date">ERS membership date</label>
+        <input type="date" id="mem-date">
       </div>
 
       <div class="form-row form-row--subgrid">
@@ -462,6 +482,7 @@
     // ── DOM element cache ─────────────────────────────────────────
     const planEl           = document.getElementById('plan');
     const dobEl            = document.getElementById('dob');
+    const memDateEl        = document.getElementById('mem-date');
     const svcYearsEl       = document.getElementById('svc-years');
     const svcMonthsEl      = document.getElementById('svc-months');
     const svcAsOfEl        = document.getElementById('svc-as-of');
@@ -500,6 +521,21 @@
       'contributory-pre2012':  { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025 },
       'noncontributory':       { multiplier: 0.0125, N: 3, mode: 'total',   vestingMonths: 120, colaRate: 0.025 },
     };
+
+    // Translates the (plan, memDate) pair from the form into the internal
+    // PLAN_CONFIGS key. Plan dropdown values are 'hybrid', 'contributory',
+    // or 'noncontributory'; memDate is the ERS membership date as a
+    // YYYY-MM-DD string. Tier (post-2012 vs pre-2012) is inferred from
+    // memDate against the 2012-07-01 boundary. Noncontributory has no
+    // tier and ignores memDate.
+    const TIER_BOUNDARY = new Date(2012, 6, 1);  // July 1, 2012
+    function derivePlanKey(plan, memDate) {
+      if (plan === 'noncontributory') return 'noncontributory';
+      if (plan !== 'hybrid' && plan !== 'contributory') return '';
+      if (!memDate) return '';
+      const tier = parseIsoDate(memDate) >= TIER_BOUNDARY ? 'post2012' : 'pre2012';
+      return `${plan}-${tier}`;
+    }
 
     // ── Projected raises (union contract, not yet absorbed into AFC) ──
     const RAISES = [
@@ -1426,7 +1462,7 @@
     }
 
     // ── AFC computation ──────────────────────────────────────────
-    function computeAndFillAfc(planKey = planEl.value) {
+    function computeAndFillAfc(planKey = derivePlanKey(planEl.value, memDateEl.value)) {
       const config = PLAN_CONFIGS[planKey];
       if (!config || !lastWindows.length) return null;
       const scored = lastWindows.map(w => ({
@@ -1596,18 +1632,23 @@
     // ── State ────────────────────────────────────────────────────
     // Tracks the last committed plan value so we can revert on cancel.
     let prevPlanValue = '';
+    // Tracks the last committed memDate value so we can revert on cancel
+    // when crossing the 2012-07-01 tier boundary recomputes AFC.
+    let prevMemDateValue = '';
 
     // ── Reactive calculate logic ──────────────────────────────────
     function canCalculate() {
       const dateOk = !!svcAsOfEl.value && (stillActiveEl.checked || !!lastDayEl.value);
-      const group1Ok = !!(planEl.value && dobEl.value) && dateOk;
+      const group1Ok = !!(planEl.value && dobEl.value && memDateEl.value) && dateOk;
       const slHours = parseFloat(slHoursEl.value);
       const slOk = isNaN(slHours) || slHours <= 0 || !!slAsOfEl.value;
       return group1Ok && parseFloat(manualAfcEl.value) > 0 && slOk;
     }
 
     function maybeCalculate() {
-      if (canCalculate()) runCalculate();
+      const ok = canCalculate();
+      graphBtn.disabled = !ok;
+      if (ok) runCalculate();
       else { drawChart(); drawSeriesTable(null); }
     }
 
@@ -1681,7 +1722,7 @@
       if (!isNaN(slHours) && slHours <= 0)
         console.warn(`Sick leave hours (${slHours}) must be positive; ignoring.`);
       const series  = calculateSeries({
-        plan             : planEl.value,
+        plan             : derivePlanKey(planEl.value, memDateEl.value),
         dob              : parseIsoDate(dobEl.value),
         enteredSvcMonths : (parseInt(svcYearsEl.value) || 0) * 12 + (parseInt(svcMonthsEl.value) || 0),
         asOfDate,
@@ -1711,7 +1752,7 @@
 
     function runClear() {
       // Form inputs
-      [planEl, dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, slAsOfEl]
+      [planEl, dobEl, memDateEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, slAsOfEl]
         .forEach(el => { el.value = ''; });
       stillActiveEl.checked = true;
       syncLastDayState();
@@ -1740,7 +1781,9 @@
       // Group 2 fieldset, prevPlanValue, status line
       earningsFieldset.disabled  = true;
       prevPlanValue              = '';
+      prevMemDateValue           = '';
       statusLine.textContent     = '';
+      graphBtn.disabled          = true;
 
       updateReloadLink();
       drawChart();
@@ -1765,6 +1808,7 @@
 
       if (!planEl.value)  mark(planEl);
       if (!dobEl.value)   mark(dobEl);
+      if (!memDateEl.value) mark(memDateEl);
       if (!svcAsOfEl.value) mark(svcAsOfEl);
       if (!stillActiveEl.checked && !lastDayEl.value) mark(lastDayEl);
       // AFC is only meaningful once a plan is chosen (fieldset enabled)
@@ -1792,13 +1836,45 @@
 
       prevPlanValue = newVal;
       earningsFieldset.disabled = !newVal;
-      const dpResult = computeAndFillAfc(newVal);
+      const dpResult = computeAndFillAfc(derivePlanKey(newVal, memDateEl.value));
       if (dpResult) {
         const existing = debugBody.querySelector('.windows-section');
         const section  = renderWindowsSection(dpResult.selected, dpResult.config);
         if (existing) existing.replaceWith(section);
         else if (debugBody.children.length) debugBody.appendChild(section);
       }
+      updateReloadLink();
+      maybeCalculate();
+    });
+
+    memDateEl.addEventListener('input', () => {
+      const newVal = memDateEl.value;
+      const oldKey = derivePlanKey(planEl.value, prevMemDateValue);
+      const newKey = derivePlanKey(planEl.value, newVal);
+
+      // Only prompt when the tier actually flipped AND an AFC was computed
+      // from paystubs (manual-only AFC doesn't depend on plan N/mode).
+      if (oldKey && newKey && oldKey !== newKey
+          && manualAfcEl.value.trim() && lastWindows.length) {
+        if (!confirm('Changing the membership date will recompute your Monthly AFC. Continue?')) {
+          memDateEl.value = prevMemDateValue;
+          maybeCalculate();
+          return;
+        }
+        prevMemDateValue = newVal;
+        const dpResult = computeAndFillAfc(newKey);
+        if (dpResult) {
+          const existing = debugBody.querySelector('.windows-section');
+          const section  = renderWindowsSection(dpResult.selected, dpResult.config);
+          if (existing) existing.replaceWith(section);
+          else if (debugBody.children.length) debugBody.appendChild(section);
+        }
+        updateReloadLink();
+        maybeCalculate();
+        return;
+      }
+
+      prevMemDateValue = newVal;
       updateReloadLink();
       maybeCalculate();
     });
@@ -1867,6 +1943,7 @@
       const add = (key, el) => { if (el.value) params.set(key, el.value); };
       add('plan',      planEl);
       add('dob',       dobEl);
+      add('memDate',   memDateEl);
       add('svcYears',  svcYearsEl);
       add('svcMonths', svcMonthsEl);
       add('svcAsOf', svcAsOfEl);
@@ -1885,7 +1962,7 @@
       reloadLinkBottom.href = url + '#reload-bar-bottom';
     }
 
-    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
+    [dobEl, memDateEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
       el.addEventListener('input', updateReloadLink)
     );
     stillActiveEl.addEventListener('change', updateReloadLink);
@@ -1908,33 +1985,118 @@
     manualAfcEl.addEventListener('input',   commitAfc);
 
     // ── URL parameter pre-fill ────────────────────────────────────
-    // Supported params: plan, dob, svcYears, svcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate
+    // Supported params: plan, dob, memDate, svcYears, svcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate
     // svcAsOf is the reference date for the entered credited service. lastDay (if set) implies
     // the user is separated or has a planned retirement date; "Still active" is unchecked.
-    // Example: ?plan=hybrid-post2012&dob=1975-06-15&svcYears=15&svcMonths=3&afc=4500
+    // Example: ?plan=hybrid&dob=1975-06-15&memDate=2014-08-01&svcYears=15&svcMonths=3&afc=4500
+    // Bad values are surfaced in the URL-error banner; good values still pre-fill.
     {
-      const p = new URLSearchParams(window.location.search);
-      const set = (el, key) => { if (p.has(key)) el.value = p.get(key); };
-      set(planEl,      'plan');
-      set(dobEl,       'dob');
-      set(svcYearsEl,  'svcYears');
-      set(svcMonthsEl, 'svcMonths');
-      set(svcAsOfEl,   'svcAsOf');
-      // Backwards compat: pre-split URLs with only `lastDay` reused that date as the as-of figure.
-      if (p.has('lastDay') && !p.has('svcAsOf')) svcAsOfEl.value = p.get('lastDay');
-      if (p.has('lastDay')) {
-        lastDayEl.value     = p.get('lastDay');
-        stillActiveEl.checked = false;
+      const SUPPORTED_PARAMS = ['plan','dob','memDate','svcYears','svcMonths','svcAsOf','lastDay','afc','slHours','slAsOf','slRate'];
+      const PLAN_VALUES = ['hybrid','contributory','noncontributory'];
+      const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+      const banner = document.getElementById('url-error-banner');
+      const bannerList = banner.querySelector('ul');
+
+      function isValidIsoDate(s) {
+        if (!ISO_DATE_RE.test(s)) return false;
+        const [y, m, d] = s.split('-').map(Number);
+        const dt = new Date(y, m - 1, d);
+        return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
       }
-      set(manualAfcEl, 'afc');
-      set(slHoursEl,   'slHours');
-      set(slAsOfEl,    'slAsOf');
-      set(slRateEl,    'slRate');
+
+      function addError(msg, el) {
+        const li = document.createElement('li');
+        li.textContent = msg;
+        bannerList.appendChild(li);
+        if (el) {
+          el.classList.add('input-error');
+          const clear = () => {
+            el.classList.remove('input-error');
+            li.remove();
+            el.removeEventListener('input',  clear);
+            el.removeEventListener('change', clear);
+            if (!bannerList.children.length) banner.hidden = true;
+          };
+          el.addEventListener('input',  clear);
+          el.addEventListener('change', clear);
+        }
+      }
+
+      const p = new URLSearchParams(window.location.search);
+
+      // Plan
+      if (p.has('plan') && p.get('plan') !== '') {
+        const v = p.get('plan');
+        if (PLAN_VALUES.includes(v)) planEl.value = v;
+        else addError(`unknown plan "${v}" — pick from the dropdown`, planEl);
+      }
+
+      // Date fields
+      const dateFields = [
+        ['dob',     dobEl],
+        ['memDate', memDateEl],
+        ['svcAsOf', svcAsOfEl],
+        ['lastDay', lastDayEl],
+        ['slAsOf',  slAsOfEl],
+      ];
+      for (const [key, el] of dateFields) {
+        if (!p.has(key) || p.get(key) === '') continue;
+        const v = p.get(key);
+        if (isValidIsoDate(v)) el.value = v;
+        else addError(`invalid date "${v}" for ${key} — expected YYYY-MM-DD`, el);
+      }
+
+      // Integer fields
+      const intFields = [
+        ['svcYears',  svcYearsEl,  0, 50],
+        ['svcMonths', svcMonthsEl, 0, 11],
+      ];
+      for (const [key, el, min, max] of intFields) {
+        if (!p.has(key) || p.get(key) === '') continue;
+        const v = p.get(key).trim();
+        const n = Number(v);
+        if (Number.isInteger(n) && n >= min && n <= max) el.value = String(n);
+        else addError(`invalid ${key} "${v}" — expected integer ${min}–${max}`, el);
+      }
+
+      // Numeric fields (positive)
+      const numFields = [
+        ['afc',     manualAfcEl, false],  // strictly > 0
+        ['slHours', slHoursEl,   true],   // ≥ 0
+        ['slRate',  slRateEl,    false],  // strictly > 0
+      ];
+      for (const [key, el, allowZero] of numFields) {
+        if (!p.has(key) || p.get(key) === '') continue;
+        const v = p.get(key);
+        const n = parseFloat(v);
+        const ok = !isNaN(n) && (allowZero ? n >= 0 : n > 0);
+        if (ok) el.value = v;
+        else addError(`invalid ${key} "${v}" — expected ${allowZero ? 'non-negative' : 'positive'} number`, el);
+      }
+
+      // lastDay implies separated; also serves as svcAsOf shim if URL omitted svcAsOf.
+      if (lastDayEl.value) {
+        stillActiveEl.checked = false;
+        if (!p.has('svcAsOf') && !svcAsOfEl.value) svcAsOfEl.value = lastDayEl.value;
+      }
+
+      // Unknown params (likely typos)
+      for (const key of p.keys()) {
+        if (!SUPPORTED_PARAMS.includes(key)) {
+          addError(`unknown parameter "${key}"`, null);
+        }
+      }
+
+      if (bannerList.children.length) banner.hidden = false;
+
       prevPlanValue             = planEl.value;
+      prevMemDateValue          = memDateEl.value;
       earningsFieldset.disabled = !planEl.value;
       syncLastDayState();
       updateReloadLink();
-      if (canCalculate()) requestAnimationFrame(runCalculate);
+      const ok = canCalculate();
+      graphBtn.disabled = !ok;
+      if (ok) requestAnimationFrame(runCalculate);
     }
     // ── Chart ────────────────────────────────────────────────────
     function drawChart(series = null, { hasSL = false, isSeparated = false, raisesNA = false } = {}) {
@@ -2331,7 +2493,7 @@
       // ── Tooltip ──────────────────────────────────────────────────
       if (eligible.length) {
         const bisect   = d3.bisector(d => d.retDate).left;
-        const colaRate = PLAN_CONFIGS[planEl.value]?.colaRate ?? 0;
+        const colaRate = PLAN_CONFIGS[derivePlanKey(planEl.value, memDateEl.value)]?.colaRate ?? 0;
         const colaLine = d3.line().curve(d3.curveStepAfter).x(p => p.x).y(p => p.y);
 
         const tip = g.append('g').attr('display', 'none');
