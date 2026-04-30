@@ -2226,10 +2226,12 @@
         const hasNotVested     = series.some(d => !d.isVested);
         const hasVestedNotElig = series.some(d => d.isVested && d.primaryPension === null);
         const hasEarlyPenalty  = series.some(d => d.status === 'early');
+        const hasAnyRegion = hasNotVested || hasVestedNotElig || hasEarlyPenalty;
         const entries = [
           ...(hasNotVested     ? [{ type: 'rect', fill: CHART.colorNotVested,     label: 'Not yet vested'                      }] : []),
           ...(hasVestedNotElig ? [{ type: 'rect', fill: CHART.colorIneligible,    label: 'Vested, not yet eligible'            }] : []),
           ...(hasEarlyPenalty  ? [{ type: 'rect', fill: CHART.colorEarlyPenalty,  label: 'Early retirement penalty'            }] : []),
+          ...(hasAnyRegion ? [{ break: true }] : []),
           { type: 'line', color: CHART.colorPrimary,      dash: null,  label: 'estimated pension'                                   },
           ...(hasSL ? [
             { type: 'line', color: CHART.colorSLCurrent,        dash: null,  label: '+ current sick leave'                 },
