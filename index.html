@@ -37,6 +37,7 @@
     /* ── Label-left rows ── */
     .form-rows { display: flex; flex-direction: column; gap: 1rem; }
     .form-row  { display: flex; align-items: baseline; gap: 1rem; }
+    .form-row[hidden] { display: none; }
     .form-row--subgrid { align-items: end; }
     .form-label {
       flex: 0 0 20ch;
@@ -320,6 +321,17 @@
         </div>
       </div>
 
+      <div class="form-row form-row--subgrid" id="nc-svc-row" hidden>
+        <span class="form-label" style="padding-left: 1.5ch;">of which, noncontributory</span>
+        <div class="sl-grid" style="grid-template-columns: auto auto">
+          <label for="nc-svc-years">Years</label>
+          <label for="nc-svc-months">Months</label>
+
+          <input type="number" id="nc-svc-years" min="0" max="50" step="1" placeholder="0" style="width: 6.5ch">
+          <input type="number" id="nc-svc-months" min="0" max="11" step="1" placeholder="0" style="width: 5.5ch">
+        </div>
+      </div>
+
       <div class="form-row">
         <label class="form-label" for="svc-as-of">Service as of</label>
         <input type="date" id="svc-as-of">
@@ -485,6 +497,9 @@
     const memDateEl        = document.getElementById('mem-date');
     const svcYearsEl       = document.getElementById('svc-years');
     const svcMonthsEl      = document.getElementById('svc-months');
+    const ncSvcRowEl       = document.getElementById('nc-svc-row');
+    const ncSvcYearsEl     = document.getElementById('nc-svc-years');
+    const ncSvcMonthsEl    = document.getElementById('nc-svc-months');
     const svcAsOfEl        = document.getElementById('svc-as-of');
     const lastDayEl        = document.getElementById('last-day');
     const stillActiveEl    = document.getElementById('still-active');
@@ -1795,6 +1810,7 @@
         .forEach(el => { el.value = ''; });
       stillActiveEl.checked = true;
       syncLastDayState();
+      syncNcSvcVisibility();
       slRateEl.value = '14';
 
       // PDF picker state
@@ -1877,6 +1893,7 @@
 
       prevPlanValue = newVal;
       earningsFieldset.disabled = !newVal;
+      syncNcSvcVisibility();
       const dpResult = computeAndFillAfc(derivePlanKey(newVal, memDateEl.value));
       if (dpResult) {
         const existing = debugBody.querySelector('.windows-section');
@@ -1961,6 +1978,17 @@
       }
       lastDayEl.min = svcAsOfEl.value || '';
     }
+
+    // NC mixed-service inputs apply only to hybrid plans (PLAN.md Stage 1).
+    // Switching to a non-hybrid plan hides the row and clears its values.
+    function syncNcSvcVisibility() {
+      const isHybrid = planEl.value === 'hybrid';
+      ncSvcRowEl.hidden = !isHybrid;
+      if (!isHybrid) {
+        ncSvcYearsEl.value  = '';
+        ncSvcMonthsEl.value = '';
+      }
+    }
     svcAsOfEl.addEventListener('input', () => {
       lastDayEl.min = svcAsOfEl.value || '';
     });
@@ -1987,6 +2015,10 @@
       add('memDate',   memDateEl);
       add('svcYears',  svcYearsEl);
       add('svcMonths', svcMonthsEl);
+      if (planEl.value === 'hybrid') {
+        add('ncSvcYears',  ncSvcYearsEl);
+        add('ncSvcMonths', ncSvcMonthsEl);
+      }
       add('svcAsOf', svcAsOfEl);
       if (!stillActiveEl.checked) add('lastDay', lastDayEl);
       add('afc',       manualAfcEl);
@@ -2003,7 +2035,7 @@
       reloadLinkBottom.href = url + '#reload-bar-bottom';
     }
 
-    [dobEl, memDateEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
+    [dobEl, memDateEl, svcYearsEl, svcMonthsEl, ncSvcYearsEl, ncSvcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
       el.addEventListener('input', updateReloadLink)
     );
     stillActiveEl.addEventListener('change', updateReloadLink);
@@ -2026,13 +2058,13 @@
     manualAfcEl.addEventListener('input',   commitAfc);
 
     // ── URL parameter pre-fill ────────────────────────────────────
-    // Supported params: plan, dob, memDate, svcYears, svcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate
+    // Supported params: plan, dob, memDate, svcYears, svcMonths, ncSvcYears, ncSvcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate
     // svcAsOf is the reference date for the entered credited service. lastDay (if set) implies
     // the user is separated or has a planned retirement date; "Still active" is unchecked.
     // Example: ?plan=hybrid&dob=1975-06-15&memDate=2014-08-01&svcYears=15&svcMonths=3&afc=4500
     // Bad values are surfaced in the URL-error banner; good values still pre-fill.
     {
-      const SUPPORTED_PARAMS = ['plan','dob','memDate','svcYears','svcMonths','svcAsOf','lastDay','afc','slHours','slAsOf','slRate'];
+      const SUPPORTED_PARAMS = ['plan','dob','memDate','svcYears','svcMonths','ncSvcYears','ncSvcMonths','svcAsOf','lastDay','afc','slHours','slAsOf','slRate'];
       const PLAN_VALUES = ['hybrid','contributory','noncontributory'];
       const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
       const banner = urlErrorBanner;
@@ -2089,8 +2121,10 @@
 
       // Integer fields
       const intFields = [
-        ['svcYears',  svcYearsEl,  0, 50],
-        ['svcMonths', svcMonthsEl, 0, 11],
+        ['svcYears',    svcYearsEl,    0, 50],
+        ['svcMonths',   svcMonthsEl,   0, 11],
+        ['ncSvcYears',  ncSvcYearsEl,  0, 50],
+        ['ncSvcMonths', ncSvcMonthsEl, 0, 11],
       ];
       for (const [key, el, min, max] of intFields) {
         if (!p.has(key) || p.get(key) === '') continue;
@@ -2134,6 +2168,7 @@
       prevMemDateValue          = memDateEl.value;
       earningsFieldset.disabled = !planEl.value;
       syncLastDayState();
+      syncNcSvcVisibility();
       updateReloadLink();
       // Registered AFTER Stage-4 addError clear listeners so the range-
       // validation class state wins on the first input event after a

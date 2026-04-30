@@ -57,13 +57,13 @@ would need to be sourced from ERS before this could be added.
 Goal: optional "of which, noncontributory" years/months sub-row, visible iff `derivePlanKey(...)` starts with `hybrid-` (i.e., plan dropdown is hybrid), hidden and ignored otherwise.
 Success: fields render under the "Credited service" row; toggling plan dropdown shows/hides them; default values are 0/0; switching away from hybrid clears values silently.
 Tests: load with plan=noncontributory → no NC fields visible; switch to hybrid → fields appear; enter 5 years → switch to contributory → fields hidden and value reset.
-Status: Not Started
+Status: Complete
 
 ## Stage 2: Wire URL params (`ncSvcYears`, `ncSvcMonths`)
 Goal: serialize/deserialize NC service in the same way as `svcYears`/`svcMonths`; update the reload-bar links.
 Success: round-trip works (set values → reload from URL → values restored); params absent → defaults to 0/0; non-hybrid plans drop the params from the URL.
 Tests: open `?plan=hybrid&memDate=2014-08-01&ncSvcYears=5&ncSvcMonths=3` → form shows 5/3; reload-bar URL contains `ncSvcYears=5&ncSvcMonths=3`; switch to noncontributory → those params disappear from the reload-bar URL.
-Status: Not Started
+Status: Complete
 
 ## Stage 3: Pass NC service through `calculateSeries()`
 Goal: thread `ncSvcMonths` from form-read into `calculateSeries({...})`; non-hybrid plans always pass 0.
