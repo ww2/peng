@@ -40,19 +40,7 @@ the **higher** of two AFC computations
 Applies only to pre-2012 plans (a post-2012 member cannot have pre-1971
 membership). The post-1971 pre-2012 cohort uses Method A only — current
 behavior (`PLAN_CONFIGS: N=3, mode='total'`) — so the work is opt-in,
-keyed off a new membership-date input.
-
-Implementation note: `IGNORED` (`index.html:838-844`) does not currently
-list any vacation-pay category. Confirm the exact paystub category name
-for lump-sum vacation pay (e.g., "Vacation Payoff", "Lump Sum Vacation",
-"Termination Vacation Pay") before wiring Method A's exclusion.
-
-### Spec correction noted
-
-In conversation I had earlier described the dual-method rule as
-"pre-2012". That was a misreading; it's pre-**1971**. The post-1971
-pre-2012 cohort is unaffected and continues to use the existing
-single-method top-3-gross AFC.
+keyed off the membership-date input.
 
 ### Survivor options
 
@@ -66,25 +54,25 @@ would need to be sourced from ERS before this could be added.
 ---
 
 ## Stage 1: Add NC-service input fields to the form
-Goal: optional "of which, noncontributory" years/months sub-row, visible only when plan is hybrid-pre2012 or hybrid-post2012, hidden (and ignored) otherwise.
+Goal: optional "of which, noncontributory" years/months sub-row, visible iff `derivePlanKey(...)` starts with `hybrid-` (i.e., plan dropdown is hybrid), hidden and ignored otherwise.
 Success: fields render under the "Credited service" row; toggling plan dropdown shows/hides them; default values are 0/0; switching away from hybrid clears values silently.
-Tests: load with plan=noncontributory → no NC fields visible; switch to hybrid-post2012 → fields appear; enter 5 years → switch to contributory → fields hidden and value reset.
+Tests: load with plan=noncontributory → no NC fields visible; switch to hybrid → fields appear; enter 5 years → switch to contributory → fields hidden and value reset.
 Status: Not Started
 
 ## Stage 2: Wire URL params (`ncSvcYears`, `ncSvcMonths`)
 Goal: serialize/deserialize NC service in the same way as `svcYears`/`svcMonths`; update the reload-bar links.
 Success: round-trip works (set values → reload from URL → values restored); params absent → defaults to 0/0; non-hybrid plans drop the params from the URL.
-Tests: open `?plan=hybrid-post2012&ncSvcYears=5&ncSvcMonths=3` → form shows 5/3; reload-bar URL contains `ncSvcYears=5&ncSvcMonths=3`; switch to noncontributory → those params disappear from the reload-bar URL.
+Tests: open `?plan=hybrid&memDate=2014-08-01&ncSvcYears=5&ncSvcMonths=3` → form shows 5/3; reload-bar URL contains `ncSvcYears=5&ncSvcMonths=3`; switch to noncontributory → those params disappear from the reload-bar URL.
 Status: Not Started
 
 ## Stage 3: Pass NC service through `calculateSeries()`
 Goal: thread `ncSvcMonths` from form-read into `calculateSeries({...})`; non-hybrid plans always pass 0.
 Success: function signature accepts `ncSvcMonths`; existing callers still produce identical output when `ncSvcMonths === 0`.
-Tests: regression — every existing scenario (all five plans, sick leave on/off, raises on/off) produces byte-identical pension values when NC = 0.
+Tests: regression — every existing scenario (all five derived plan keys, sick leave on/off, raises on/off) produces byte-identical pension values when NC = 0.
 Status: Not Started
 
 ## Stage 4: Split-multiplier in the blue curve
-Goal: rewrite the pension expression in `calculateSeries()` (`index.html:1142-1146`, `1156-1163`) to use a helper that splits service into NC and hybrid portions.
+Goal: rewrite the pension expression in `calculateSeries()` to use a helper that splits service into NC and hybrid portions. The helper takes already-adjusted `afcMonthly` and `svcMonths` per variant — no awareness of raises or sick-leave semantics.
 
 ```js
 function blendedBenefit(svcMonths, ncMonths, afc, arf, plan, config) {
@@ -114,9 +102,9 @@ Tests: pick a hybrid-post2012 mixed-service scenario, run it through `../ers/ind
 Status: Not Started
 
 ## Stage 6: Eligibility, vesting, ARF — verify unchanged
-Goal: confirm `primaryEligibility()`, `primaryARF()`, the in-line eligibility switch (`index.html:1099-1129`), and vesting checks all use **total** credited service (`svcAtM`), not the hybrid portion.
+Goal: confirm `primaryEligibility()`, `primaryARF()`, the in-line eligibility switch in `calculateSeries` (`index.html:1194`), and vesting checks all use **total** credited service (`svcAtM`), not the hybrid portion.
 Success: visual review confirms `ncMonths` is referenced only in the benefit formula, never in eligibility/vesting/ARF code paths.
-Tests: hybrid-post2012, 8 hybrid yrs + 2 NC yrs (total 10) → vested (10-yr threshold met); 7 hybrid + 2 NC (total 9) → not vested.
+Tests: hybrid-post2012 (plan=hybrid, memDate ≥ 2012-07-01), 8 hybrid yrs + 2 NC yrs (total 10) → vested (10-yr threshold met); 7 hybrid + 2 NC (total 9) → not vested.
 Status: Not Started
 
 ## Stage 7: Plan-change UX
@@ -137,7 +125,7 @@ Concrete changes:
 - **`computeAndFillAfc()`** (`index.html:1467`): when the pre-1971 trigger fires, run `solveDP(scoreA, 3)` and `solveDP(scoreB, 5)`, take the larger monthly AFC, and write that into `manualAfcEl`. Surface in the windows-section render which method won and the runner-up's AFC, so the user can see the comparison.
 - **Manual-AFC path:** if the user enters AFC by hand without paystubs and `memDate` is pre-1971 on a triggering plan, render an inline note: "Pre-1971 members are entitled to the higher of two AFC methods — provide paystubs to compute both, or ensure your manual entry already reflects the higher." No automatic computation possible without stubs.
 - **Plan-change / memDate-change confirm:** the existing AFC recompute confirmation flow (plan-change at `index.html:1862+`, memDate-change at `:1888+`) naturally covers this — if the new derivation triggers the pre-1971 path, the recompute uses the dual-method.
-- **Plan compatibility:** the trigger fires when `derivePlanKey(planEl.value, memDateEl.value)` is `hybrid-pre2012`, `contributory-pre2012`, or `noncontributory`, AND `memDate < 1971-01-01`. Hybrid/contributory members with `memDate >= 2012-07-01` derive to post-2012 keys, naturally excluding them — and a `memDate >= 2012-07-01` is always >= 1971-01-01 anyway, so there's no overlap. The noncontributory spec at `info/Noncontributory200912.md:119-125` extends the dual-method to its pre-1971 members.
+- **Plan compatibility:** the trigger fires when `derivePlanKey(planEl.value, memDateEl.value)` is `hybrid-pre2012`, `contributory-pre2012`, or `noncontributory`, AND `memDate < 1971-01-01`. Post-2012 keys are naturally excluded since `memDate >= 2012-07-01` is always `>= 1971-01-01`. The noncontributory spec at `info/Noncontributory200912.md:119-125` extends the dual-method to its pre-1971 members.
 
 Success: pre-1971 stubs produce the higher of the two AFCs in the AFC field; non-pre-1971 stubs produce the same AFC as the current build.
 
@@ -152,7 +140,7 @@ Tests:
 Status: Not Started
 
 ## Stage 9: Documentation updates
-Goal: update `CLAUDE.md` (Key Logic section, URL params list — `memDate` is already there post-PREPLAN; add `ncSvcYears`, `ncSvcMonths`); update `info/DESIGN.md` with two new subsections — "NC mixed-service" and "Pre-1971 AFC dual-method" — citing specs; remove/update the "hybrid plan support" item in `TODO.md`.
+Goal: update `CLAUDE.md` — the "Where Things Live" section (mention NC split, `blendedBenefit` helper) and the URL params list in "Running the App" (add `ncSvcYears`, `ncSvcMonths`; `memDate` is already listed post-PREPLAN); update `info/DESIGN.md` with two new subsections — "NC mixed-service" and "Pre-1971 AFC dual-method" — citing specs; remove/update the "hybrid plan support" item in `TODO.md`.
 Success: docs reflect current behavior; reading `CLAUDE.md` cold conveys both the split-multiplier rule and the pre-1971 dual-method trigger.
 Status: Not Started
 
