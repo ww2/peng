@@ -4,115 +4,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A single-file (`index.html`) browser-based pension calculator for ERS (Employees' Retirement System) members. No build system, no server — open directly from `file://`. All logic, styles, and markup live in `index.html`.
+A single-file (`index.html`) browser-based pension calculator for ERS (Employees' Retirement System) members. No build system, no server — open directly from `file://`. All logic, styles, and markup live in `index.html`. External deps: D3 v7 and pdf.js, both via CDN.
 
 ## Running the App
 
-Open `index.html` in a browser via `file://`. Use URL parameters for development convenience:
+Open `index.html` in a browser via `file://`. URL parameters for development convenience:
 
 ```
-file:///path/to/index.html?plan=hybrid-post2012&dob=1975-06-15&svcYears=15&svcMonths=3&svcAsOf=2024-01-01&afc=4500&slHours=240&slRate=14&raiseRate=2.5
+file:///path/to/index.html?plan=hybrid-post2012&dob=1975-06-15&svcYears=15&svcMonths=3&svcAsOf=2024-01-01&afc=4500&slHours=240&slAsOf=2024-01-01
 ```
 
-Supported params: `plan`, `dob`, `svcYears`, `svcMonths`, `svcAsOf`, `lastDay`, `afc`, `slHours`, `slRate`, `raiseRate`
+Supported params (`index.html:1911-1933`): `plan`, `dob`, `svcYears`, `svcMonths`, `svcAsOf`, `lastDay`, `afc`, `slHours`, `slAsOf`, `slRate`. Pre-split URLs containing only `lastDay` are accepted as a shim — that date is also used for `svcAsOf`.
 
-## Architecture
+## Form Structure
 
-**Single-file HTML** with:
-- D3.js v7 loaded from CDN
-- Vanilla JS modules (no bundler)
-- No external dependencies beyond D3 and pdf.js (pdf.js added in Stage 2)
+Four fieldsets in `index.html:270-417`:
 
-**Two form groups** gate the Calculate button:
-- Group 1: plan variant + DOB + (last day of service OR service-as-of date); optional: service years/months, sick leave hours/rate, annual raise %
-- Group 2: paystub directory picker OR manual AFC — Calculate only enables when both groups are satisfied; the DP solver writes into the manual AFC field when paystubs are loaded
+1. **Required information** — plan, DOB, credited service (years/months), service-as-of date, last day of service (or "Still active" checkbox)
+2. **Optional adjustments** — sick leave hours / as-of date / accrual rate (default 14 hrs/mo)
+3. **Contractual adjustments** — read-only `RAISES` table (`index.html:506-510`) with a "Projected raises do not apply" override checkbox
+4. **Earnings data** — manual monthly AFC OR paystub directory picker (DP solver writes the computed AFC into the manual field)
 
-`canCalculate()` requires: plan + dob + (lastDay OR svcAsOf) + positive AFC value.
+`canCalculate()` (`index.html:1602`) gates the Generate-graph button on: plan + dob + svcAsOf + (Still active OR lastDay) + positive AFC + (no SL hours OR slAsOf set).
 
-## Implementation Status
+## Where Things Live
 
-All major features are complete:
-- Scaffold + form + URL params
-- Directory picker + PDF extraction (pdf.js, DP window solver)
-- Plan variant → AFC wiring + UX flow (clear, reload link, plan-change confirmation)
-- Date utilities (`monthsBetween`, `fractionalAge`, `serviceAtMonth`, `addMonths`, `sickLeaveToMonths`)
-- Pension series table for all plans
-- D3 axes, pension curve, ineligible/vesting shading
-- Sick leave lines (current and projected)
-- Annual raise rate applied to AFC
-- COLA projection on hover
-- Hover tooltip with crosshair
-- Official ERS comparison line (blue): ARF lookup tables ported from official calculator source, drawn alongside the blue curve for direct comparison
+- **Plan configs** — `PLAN_CONFIGS` at `index.html:497-503` (multiplier, AFC averaging window `N`, AFC mode, vesting months, COLA rate)
+- **ARF tables** — `PRIMARY_ARF_TABLES` at `index.html:516-620`, copied verbatim from the official ERS calculator's `ers.data.js` (tier1) and `ers.dataNew.js` (tier2)
+- **Eligibility / ARF lookup** — `primaryEligAge` (`:639`), `primaryArfAge` (`:625`, days≥15 rounds up), `primaryEligibility` (`:651`, returns `'regular' | 'early' | 'ineligible'`), `primaryARF` (`:682`)
+- **Pension series** — `calculateSeries` at `index.html:1143`. Per-month rows from next month → 10 years past first normal retirement (50-yr ceiling). Each row carries `primaryPension`, `pensionCurrentSL`, `pensionProjectedSL`, `pensionWithRaises`, `pensionRaisesCurrentSL`, `pensionRaisesProjectedSL`. Already-separated members and future committed `lastDayOfSvc` snap eligible rows to a single value (`:1238-1277`).
+- **Date utilities** — `parseDate` (`:1055`), `addMonths` (`:1060`), `addDays` (`:1069`), `monthsBetween` (`:1084`), `fractionalAge` (`:1091`), `serviceAtMonth` (`:1100`)
+- **Sick leave → months** — `sickLeaveToMonths` at `index.html:1116`. Spec: ≥60 days (480 hrs) required; 60d→3mo, each further 20d→1mo, remainder ≥10d→1mo
+- **Raises** — `applyRaises` at `index.html:1129` blends each scheduled raise linearly across the plan's N-year averaging window, capped at `lastDayOfSvc` if set
+- **Paystub pipeline** — `filterStubs` (`:1289`), `generateWindows` (`:1319`), `scoreStub` (`:1349`), `solveDP` (`:1356`), `computeAndFillAfc` (`:1430`)
+- **Chart** — `drawChart` at `index.html:1941`. Curves drawn back-to-front via `makeCurve` at `:2177-2202`
+- **Debug handle** — `window._debug` (`:693`) exposes the ARF helpers; `window._debug.lastSeries` is set after each Calculate
 
-Deferred items: mixed-service (multi-plan) members, survivor benefit options (see `TODO.md`).
-
-## Key Logic
-
-**Pension formula (blue curve):**
+The pension formula itself is one line at `index.html:1200-1201`:
 ```js
-pension    = multiplier × (svcAtM / 12) × effectiveAfc × factor
-factor     = Math.max(0, 1 - config.earlyPenalty * yearsEarly)
-yearsEarly = isNormal ? 0 : Math.max(0, normalRetAge - Math.floor(ageAtM))
+afcMonthly * (svcYrs + svcMos / 12) * config.multiplier * arf
 ```
-`normalRetAge` is always the **primary** normal retirement age (e.g., 65 for hybrid-post2012). The lower alternative threshold (e.g., 60/30) sets `isNormal = true`, which zeroes `yearsEarly` directly rather than lowering the reference age. See `info/DESIGN.md` for rationale.
-
-The whole-year floor produces a **staircase curve**; see `info/DESIGN.md` for details.
-
-**Official pension formula (red curve):**
-```js
-const arfAge  = officialArfAge(dob, retDate);   // {year, month} — days≥15 rounds up
-const eligAge = officialEligAge(dob, retDate);  // {year, month, day} — no rounding
-const elig    = officialEligibility(plan, eligAge, Math.floor(svcAtM / 12));
-const arf     = officialARF(elig, plan, arfAge.year, arfAge.month);
-officialPension = elig === 'ineligible' ? null
-  : Math.floor(Math.round(afcMonthly × (svcYrs + svcMos/12) × multiplier × arf × 100) / 100);
-```
-ARF values come from `OFFICIAL_ARF_TABLES` (ported from `ers/_js/scripts/ers.data.js` and `ers.dataNew.js`). The red curve uses current AFC with no sick leave or raise adjustment. `window._debug.lastSeries` exposes the series in the browser console after Calculate.
-
-**Plan configs:**
-```js
-const PLAN_CONFIGS = {
-  'hybrid-post2012':       { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120, colaRate: 0.015, earlyPenalty: 0.05 },
-  'hybrid-pre2012':        { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025, earlyPenalty: 0.05 },
-  'contributory-post2012': { multiplier: 0.0175, N: 5, mode: 'regular', vestingMonths: 120, colaRate: 0.015, earlyPenalty: 0.05 },
-  'contributory-pre2012':  { multiplier: 0.0200, N: 3, mode: 'total',   vestingMonths:  60, colaRate: 0.025, earlyPenalty: 0.05 },
-  'noncontributory':       { multiplier: 0.0125, N: 3, mode: 'total',   vestingMonths: 120, colaRate: 0.025, earlyPenalty: 0.06 },
-};
-```
-
-**AFC monthly** = `dpTotal / N / 12` (DP solver picks best N non-overlapping 12-month windows).
-
-**Service accrual** — `asOfDate` is either `lastDayOfSvc` (separated) or `svcAsOf` (active):
-```js
-function serviceAtMonth(enteredMonths, asOfDate, retDate, lastDayOfSvc) {
-  const accrualEnd = lastDayOfSvc
-    ? new Date(Math.min(lastDayOfSvc.getTime(), retDate.getTime()))
-    : retDate;
-  return enteredMonths + Math.max(0, monthsBetween(asOfDate, accrualEnd));
-}
-```
-
-**Annual raise rate** grows the AFC forward in time:
-```js
-const yearsAhead   = Math.max(0, monthsBetween(asOfDate, retDate)) / 12;
-const effectiveAfc = raiseRate > 0
-  ? afcMonthly * Math.pow(1 + raiseRate, yearsAhead)
-  : afcMonthly;
-```
-
-**Sick leave** converts unused hours to credited service months:
-```js
-// Requires ≥ 60 days (480 hrs); 60 days → 3 months, each further 20 days → 1 month,
-// remainder ≥ 10 days → 1 extra month.
-function sickLeaveToMonths(hours) {
-  const days = hours / 8;
-  if (days < 60) return 0;
-  const whole = Math.floor(days / 20);
-  return whole + (days % 20 >= 10 ? 1 : 0);
-}
-```
-
-Each series row carries `pensionCurrentSL` (with sick leave as entered) and `pensionProjectedSL` (sick leave accrued at `slRate` hrs/month through retirement or last day). Both use the same formula with extra credited months added to `svcAtM`.
 
 ## Plan Eligibility Rules
 
@@ -124,28 +55,22 @@ Each series row carries `pensionCurrentSL` (with sick leave as entered) and `pen
 | contributory-pre2012 | Age 55/5 yos | Any age/25 yos | 5%/yr below age 55 |
 | noncontributory | Age 62/10 yos OR Age 55/30 yos | Age 55/20–29 yos | 6%/yr below age 62 |
 
-For dual-threshold plans (hybrid-post2012, hybrid-pre2012, noncontributory), whichever normal threshold is met first ends the penalty. The penalty basis is always the primary normal age, not the lower alternative — see `info/DESIGN.md`.
+For dual-threshold plans, whichever normal threshold is met first ends the penalty (encoded in `primaryEligibility`'s switch, returning `'regular'` so `primaryARF` returns 1). The penalty values themselves come from the ARF tables, not a per-plan rate constant. Authoritative spec: `info/Retirement-Information-{Hybrid,Contrib,Noncontributory}-eff.-6.2022.md`.
 
-## Chart Specification
+## Chart
 
-- **X axis** (horizontal): Retirement date, time scale; major ticks Jan 1/year (grid line), minor every 2 months (odd months)
-- **Y axis** (vertical): Monthly pension $, linear scale; major ticks every $1,000, minor every $100
-- **X range**: next month → (earliest normal retirement date + 10 years)
-- **Y range**: floor of minimum across all active curves → ceil of maximum across all active curves, each rounded to nearest $1,000
-- **Lines** (all use `line.defined` — gaps where pension is null):
-  - Blue solid: base pension (this calculator)
-  - Green solid: base + current sick leave months
-  - Light-green dashed: base + projected sick leave (no usage through retirement)
-  - Red solid: official ERS calculator value (current AFC, no sick leave, no raise)
-- **Legend**: box in top-right corner of plot area; entries for all active curves
-- **Shaded regions** (left of eligible date):
-  - Dark grey (`#e8e8e8`): not yet vested
-  - Light grey (`#f5f5f5`): vested, not yet eligible to collect
-- **Hover tooltip**: vertical + horizontal crosshair; dots on all active curves; label snaps to the curve closest to cursor Y; COLA projection curve (dashed green) extends 20 years from the hovered point. Label format: `"May 2031 — $2,847/mo"` (or `"(+ cur. SL)"` / `"(+ proj. SL)"` / `"(official)"` suffix when applicable).
+`drawChart` at `index.html:1941`. Notable:
+
+- **Zone compression** (`COMPRESS_PX` at `:1957`, `compressedSegs` at `:1977-1993`) — the not-yet-vested and vested-but-ineligible date ranges are squashed to fixed pixel widths and separated from the eligible zone by zigzag break marks (`:2212-2223`); axis labels switch from years to a single boundary marker per compressed segment
+- **Curves** (`makeCurve` at `:2177`, drawn back-to-front so primary sits on top): primary blue (`primaryPension`), lighter-blue solid + dashed sick-leave variants, purple raises and raises+SL variants. Dashed for "projected" sick leave. All use `line.defined` so gaps appear where the value is null (ineligible months)
+- **Region shading** (`:2035-2085`): not-yet-vested (`#e8e8e8`), vested-but-ineligible (`#f5f5f5`), early-retirement-penalty zone between first eligible and first normal retirement (`#f0f0f0`)
+- **Legend** (`:2225-2306`) — flowed left-to-right below the X-axis label, wraps and column-aligns; only shows entries for active curves
+- **Hover tooltip + COLA** (`:2330+`): dot on each visible curve at the hovered month; label snaps to the curve nearest the cursor; a dashed-green COLA projection extends 20 years from the hovered point using the plan's `colaRate`. Suffix: `(+ cur. SL)`, `(+ proj. SL)`, `(+ raises)`, etc.
+- **Estimation table** (`drawSeriesTable` at `:1627`) — first 48 rows; collapses tail rows once values stabilize
 
 ## Reference Documents
 
-- `info/DESIGN.md` — design decisions and rationale (staircase curve, penalty reference age, official line architecture, AFC field UX, etc.)
-- `info/*.md` (excluding `DESIGN.md`) — **authoritative** plan specs: legal definitions of multipliers, eligibility thresholds, and AFC rules for each plan variant; treat these as the source of truth
-- `info/originals/` — archived PDF originals; **ignore these** — the `.md` files in `info/` are the converted, cross-checked versions
-- `ers/` — downloaded official ERS calculator source; `ers/_js/scripts/ers.data.js` and `ers.dataNew.js` are the source of the embedded ARF tables
+- `info/Retirement-Information-{Hybrid,Contrib,Noncontributory}-eff.-6.2022.md`, `info/ContribGeneral201205.md`, `info/ContribHybrid201205.md`, `info/Noncontributory200912.md`, `info/act-163-relating-to-employees-retirement-system.md` — **authoritative** plan specs (multipliers, eligibility thresholds, AFC rules). Treat as source of truth when the calculator's behavior is in question.
+- `info/DESIGN.md` — design decisions and rationale (staircase curve, penalty reference age, AFC field UX)
+- `info/originals/` — archived PDF originals; ignore — the `.md` files are the converted, cross-checked versions
+- `PLAN.md` — ephemeral; current forward-looking work plan, may be deleted when its stages land

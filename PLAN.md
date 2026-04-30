@@ -56,7 +56,12 @@ single-method top-3-gross AFC.
 
 ### Survivor options
 
-Remain deferred per existing `TODO.md` — no work in this plan.
+Remain deferred — no work in this plan. The chart currently shows Maximum
+Allowance only. The other retirement options (Options A, B, C — various
+survivor continuance percentages) reduce the member's monthly amount by
+actuarial factors that depend on the member's age and the beneficiary's
+age at retirement. Those factors are not in the source PDFs on hand; they
+would need to be sourced from ERS before this could be added.
 
 ---
 
