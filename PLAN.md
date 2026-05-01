@@ -105,13 +105,13 @@ Status: Complete (no-op — peng has no separate red curve; `primaryPension` (bl
 Goal: confirm `primaryEligibility()`, `primaryARF()`, the in-line eligibility switch in `calculateSeries` (`index.html:1194`), and vesting checks all use **total** credited service (`svcAtM`), not the hybrid portion.
 Success: visual review confirms `ncMonths` is referenced only in the benefit formula, never in eligibility/vesting/ARF code paths.
 Tests: hybrid-post2012 (plan=hybrid, memDate ≥ 2012-07-01), 8 hybrid yrs + 2 NC yrs (total 10) → vested (10-yr threshold met); 7 hybrid + 2 NC (total 9) → not vested.
-Status: Not Started
+Status: Complete
 
 ## Stage 7: Plan-change UX
 Goal: NC fields' visibility follows the derived plan key — visible iff `derivePlanKey(planEl.value, memDateEl.value)` starts with `hybrid-`. When NC values are non-zero and the dropdown changes to a non-hybrid plan, prompt with the same confirmation pattern as the AFC plan-change prompt (`info/DESIGN.md:44-52`). Editing `memDate` within hybrid (which only flips the tier, not the plan type) preserves NC values silently — the AFC tier-cross confirm at `index.html:1888+` still fires for AFC recompute, but NC values are untouched.
 Success: dropdown hybrid → noncontributory with NC=5 prompts "this will clear your noncontributory service entry — continue?"; editing memDate within hybrid (e.g., 2015 → 2010) preserves NC values.
 Tests: manual UX check.
-Status: Not Started
+Status: Complete
 
 ## Stage 8: Pre-1971 dual-method AFC computation
 Goal: when `memDate < 1971-01-01` and the derived plan key is `hybrid-pre2012`, `contributory-pre2012`, or `noncontributory`, compute AFC as `max(methodA, methodB)` where Method A is the existing top-3-gross-excluding-lump-sum-vacation and Method B is top-5-all-earnings-including-lump-sum-vacation.

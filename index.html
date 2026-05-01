@@ -1905,6 +1905,17 @@
         }
       }
 
+      const ncEntered = (parseInt(ncSvcYearsEl.value) || 0) + (parseInt(ncSvcMonthsEl.value) || 0) > 0;
+      if (prevPlanValue === 'hybrid' && newVal && newVal !== 'hybrid' && ncEntered) {
+        if (!confirm('Changing the plan will clear your noncontributory service entry. Continue?')) {
+          planEl.value = prevPlanValue;
+          earningsFieldset.disabled = !prevPlanValue;
+          updateReloadLink();
+          maybeCalculate();
+          return;
+        }
+      }
+
       prevPlanValue = newVal;
       earningsFieldset.disabled = !newVal;
       syncNcSvcVisibility();
