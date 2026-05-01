@@ -101,6 +101,7 @@
 
     /* ── Manual AFC field ── */
     #manual-afc { width: 11ch; }
+    #manual-afc-note { margin-top: 0.4rem; font-size: 0.85rem; color: #c60; max-width: 36rem; }
 
     /* ── Projected raises table ── */
     #raises-table { font-size: 0.8rem; border-collapse: collapse; }
@@ -413,6 +414,7 @@
         <label class="form-label" for="manual-afc">Monthly AFC ($)</label>
         <input type="text" inputmode="decimal" id="manual-afc" placeholder="e.g. 4413.00">
       </div>
+      <div id="manual-afc-note" hidden></div>
     </div>
 
     <div class="or-divider">or</div>
@@ -507,6 +509,7 @@
     const raisesNaTextEl   = document.getElementById('raises-na-text');
     const raisesTableRowEl = document.getElementById('raises-table-row');
     const manualAfcEl      = document.getElementById('manual-afc');
+    const manualAfcNoteEl  = document.getElementById('manual-afc-note');
     const earningsFieldset = document.getElementById('group-earnings-input');
     const statusLine       = document.getElementById('status-line');
     const reloadLink       = document.getElementById('reload-link');
@@ -907,7 +910,7 @@
       debugDetails.classList.remove('disabled');
       debugPanelEl.hidden = false;
       const dpResult = computeAndFillAfc();
-      if (dpResult) debugBody.appendChild(renderWindowsSection(dpResult.selected, dpResult.config));
+      if (dpResult) debugBody.appendChild(renderWindowsSection(dpResult.selected, dpResult.config, dpResult.dualMethod));
       updateReloadLink();
       maybeCalculate();
     });
@@ -928,6 +931,17 @@
       Object.entries(ALIASES).map(([old, canonical]) => [canonical, old])
     );
 
+    // Pre-1971 dual-method AFC: members whose membership date is before
+    // 1971-01-01 (on a pre-2012 plan or noncontributory) are entitled to the
+    // higher of:
+    //   Method A — top 3 years EXcluding lump-sum vacation pay
+    //   Method B — top 5 years INcluding lump-sum vacation pay
+    // The exact paystub category key for lump-sum vacation hasn't been seen
+    // in real stub data; this is the best-guess name. Adding it to KNOWN
+    // keeps it from triggering "unknown earning type" warnings if it ever
+    // does appear; it is NOT in IGNORED because Method B needs to include it.
+    const LUMP_SUM_VACATION = 'Lump Sum Vacation Pay';
+
     const KNOWN = new Set([
       'Regular',
       'Ordinary Overtime',
@@ -940,6 +954,7 @@
       'Tax WIK',
       'BNS Retro',
       'Bonus RetroPay Dues Eligible',
+      LUMP_SUM_VACATION,
     ]);
 
     const IGNORED = new Set([
@@ -1413,6 +1428,12 @@
     function scoreStub(stub, mode) {
       const e = stub.currentEarnings;
       if (mode === 'regular') return e['Regular'] ?? 0;
+      if (mode === 'totalExclVacation') {
+        return Object.entries(e).reduce(
+          (s, [k, v]) => k === LUMP_SUM_VACATION ? s : s + v, 0);
+      }
+      // 'total' and 'totalInclVacation' both sum all non-IGNORED earnings.
+      // currentEarnings has IGNORED stripped by filterStubs already.
       return Object.values(e).reduce((s, v) => s + v, 0);
     }
 
@@ -1491,9 +1512,26 @@
     }
 
     // ── AFC computation ──────────────────────────────────────────
+    // Pre-1971 dual-method AFC trigger: members on hybrid-pre2012,
+    // contributory-pre2012, or noncontributory whose membership date is
+    // before 1971-01-01 are entitled to max(Method A, Method B).
+    const PRE_1971_DATE = new Date(1971, 0, 1);
+    function isPre1971DualMethod(planKey) {
+      const memDate = memDateEl.value ? parseIsoDate(memDateEl.value) : null;
+      if (!memDate || memDate >= PRE_1971_DATE) return false;
+      return planKey === 'hybrid-pre2012'
+          || planKey === 'contributory-pre2012'
+          || planKey === 'noncontributory';
+    }
+
     function computeAndFillAfc(planKey = derivePlanKey(planEl.value, memDateEl.value)) {
       const config = PLAN_CONFIGS[planKey];
       if (!config || !lastWindows.length) return null;
+
+      if (isPre1971DualMethod(planKey)) {
+        return computeDualMethodAfc(config);
+      }
+
       const scored = lastWindows.map(w => ({
         ...w,
         score: w.stubs.reduce((sum, s) => sum + scoreStub(s, config.mode), 0),
@@ -1504,13 +1542,58 @@
       return { selected: result.selected, config };
     }
 
-    function renderWindowsSection(selected, config) {
+    function computeDualMethodAfc(config) {
+      const scoreWindows = mode => lastWindows.map(w => ({
+        ...w,
+        score: w.stubs.reduce((sum, s) => sum + scoreStub(s, mode), 0),
+      }));
+      const resultA = solveDP(scoreWindows('totalExclVacation'), 3);
+      const resultB = solveDP(scoreWindows('totalInclVacation'), 5);
+      if (!resultA && !resultB) return null;
+
+      const afcA = resultA ? resultA.total / 3 / 12 : -Infinity;
+      const afcB = resultB ? resultB.total / 5 / 12 : -Infinity;
+      const aWins = afcA >= afcB;
+      const winner = aWins
+        ? { method: 'A', N: 3, mode: 'top 3 excl. vacation', result: resultA, afc: afcA }
+        : { method: 'B', N: 5, mode: 'top 5 incl. vacation', result: resultB, afc: afcB };
+      const runnerUp = aWins
+        ? (resultB ? { method: 'B', N: 5, mode: 'top 5 incl. vacation', afc: afcB } : null)
+        : (resultA ? { method: 'A', N: 3, mode: 'top 3 excl. vacation', afc: afcA } : null);
+
+      // If no stub actually has a LUMP_SUM_VACATION line, the two methods sum
+      // identical earnings — surface a warning so the user knows the comparison
+      // wasn't meaningful (and that, if vacation pay was paid, the paystub
+      // category may be using a different label than expected).
+      const hasVacation = lastWindows.some(w =>
+        w.stubs.some(s => (s.currentEarnings[LUMP_SUM_VACATION] ?? 0) > 0));
+
+      manualAfcEl.value = winner.afc.toFixed(2);
+      return {
+        selected: winner.result.selected,
+        config: { ...config, N: winner.N, mode: winner.mode },
+        dualMethod: { winner, runnerUp, hasVacation },
+      };
+    }
+
+    function renderWindowsSection(selected, config, dualMethod = null) {
       const lines = [
         `Best ${config.N} window${config.N !== 1 ? 's' : ''} (${config.mode} pay):`,
         ...selected.map(w =>
           `  ${fmtDate(w.start)} – ${fmtDate(w.endIncl)}   $${fmtMoney(w.score / 12)}/mo avg`
         ),
       ];
+      if (dualMethod) {
+        lines.push('');
+        lines.push(`Pre-1971 dual-method AFC:`);
+        lines.push(`  Using Method ${dualMethod.winner.method} (${dualMethod.winner.mode}): $${fmtMoney(dualMethod.winner.afc)}/mo`);
+        if (dualMethod.runnerUp) {
+          lines.push(`  Runner-up Method ${dualMethod.runnerUp.method} (${dualMethod.runnerUp.mode}): $${fmtMoney(dualMethod.runnerUp.afc)}/mo`);
+        }
+        if (!dualMethod.hasVacation) {
+          lines.push(`  Note: no '${LUMP_SUM_VACATION}' entries found — Methods A and B differ only in window count.`);
+        }
+      }
       const pre = document.createElement('pre');
       pre.className   = 'filter-summary windows-section';
       pre.textContent = lines.join('\n');
@@ -1825,6 +1908,7 @@
       stillActiveEl.checked = true;
       syncLastDayState();
       syncNcSvcVisibility();
+      updateManualAfcNote();
       slRateEl.value = '14';
 
       // PDF picker state
@@ -1922,10 +2006,11 @@
       const dpResult = computeAndFillAfc(derivePlanKey(newVal, memDateEl.value));
       if (dpResult) {
         const existing = debugBody.querySelector('.windows-section');
-        const section  = renderWindowsSection(dpResult.selected, dpResult.config);
+        const section  = renderWindowsSection(dpResult.selected, dpResult.config, dpResult.dualMethod);
         if (existing) existing.replaceWith(section);
         else if (debugBody.children.length) debugBody.appendChild(section);
       }
+      updateManualAfcNote();
       updateReloadLink();
       maybeCalculate();
     });
@@ -1948,16 +2033,18 @@
         const dpResult = computeAndFillAfc(newKey);
         if (dpResult) {
           const existing = debugBody.querySelector('.windows-section');
-          const section  = renderWindowsSection(dpResult.selected, dpResult.config);
+          const section  = renderWindowsSection(dpResult.selected, dpResult.config, dpResult.dualMethod);
           if (existing) existing.replaceWith(section);
           else if (debugBody.children.length) debugBody.appendChild(section);
         }
+        updateManualAfcNote();
         updateReloadLink();
         maybeCalculate();
         return;
       }
 
       prevMemDateValue = newVal;
+      updateManualAfcNote();
       updateReloadLink();
       maybeCalculate();
     });
@@ -2013,6 +2100,18 @@
         ncSvcYearsEl.value  = '';
         ncSvcMonthsEl.value = '';
       }
+    }
+
+    // Pre-1971 dual-method members entering AFC manually (no paystubs) get
+    // a heads-up that the manual entry needs to already reflect the higher
+    // of Method A and Method B (PLAN.md Stage 8). Hidden in all other cases.
+    function updateManualAfcNote() {
+      const planKey = derivePlanKey(planEl.value, memDateEl.value);
+      const trigger = planKey && isPre1971DualMethod(planKey) && !lastWindows.length;
+      manualAfcNoteEl.hidden = !trigger;
+      manualAfcNoteEl.textContent = trigger
+        ? "Pre-1971 members are entitled to the higher of two AFC methods — provide paystubs to compute both, or ensure your manual entry already reflects the higher."
+        : '';
     }
     svcAsOfEl.addEventListener('input', () => {
       lastDayEl.min = svcAsOfEl.value || '';
@@ -2194,6 +2293,7 @@
       earningsFieldset.disabled = !planEl.value;
       syncLastDayState();
       syncNcSvcVisibility();
+      updateManualAfcNote();
       updateReloadLink();
       // Registered AFTER Stage-4 addError clear listeners so the range-
       // validation class state wins on the first input event after a
