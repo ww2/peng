@@ -1189,10 +1189,25 @@
       return afc;
     }
 
+    // Hybrid mixed-service benefit: NC-plan years get the 1.25% multiplier
+    // and the rest get the hybrid multiplier (PLAN.md Stage 4). For non-hybrid
+    // plans, ncMonths is ignored and the formula collapses to the single-multiplier
+    // case. ncMonths is clamped to svcMonths so hybridYrs never goes negative.
+    function blendedBenefit(svcMonths, ncMonths, afc, arf, plan, config) {
+      const totalYrs  = svcMonths / 12;
+      const ncYrs     = Math.min(ncMonths, svcMonths) / 12;
+      const hybridYrs = totalYrs - ncYrs;
+      const isHybrid  = plan.startsWith('hybrid');
+      const benefit   = isHybrid
+        ? afc * ((hybridYrs * config.multiplier) + (ncYrs * 0.0125)) * arf
+        : afc * totalYrs * config.multiplier * arf;
+      return Math.floor(Math.round(benefit * 100) / 100);
+    }
+
     // ── Pension series ───────────────────────────────────────────
     // Returns an array of rows, one per candidate retirement month, from the
     // 1st of next month through 10 years past the first normal retirement month.
-    function calculateSeries({ plan, dob, enteredSvcMonths, asOfDate, lastDayOfSvc, afcMonthly, slHours, slRate, slAsOf }) {
+    function calculateSeries({ plan, dob, enteredSvcMonths, ncSvcMonths = 0, asOfDate, lastDayOfSvc, afcMonthly, slHours, slRate, slAsOf }) {
       const config = PLAN_CONFIGS[plan];
       const today  = new Date();
       const start  = new Date(today.getFullYear(), today.getMonth() + 1, 1);
@@ -1244,17 +1259,16 @@
         let pensionRaisesProjectedSL = null;
 
         const svcYrs    = Math.floor(svcAtM / 12);
-        const svcMos    = svcAtM % 12;
         const eligAge   = primaryEligAge(dob, retDate);
         const arfAge    = primaryArfAge(dob, retDate);
         const offElig   = primaryEligibility(plan, eligAge, svcYrs);
         const arf       = primaryARF(offElig, plan, arfAge.year, arfAge.month);
         const primaryPension = offElig === 'ineligible' ? null
-          : Math.floor(Math.round(afcMonthly * (svcYrs + svcMos / 12) * config.multiplier * arf * 100) / 100);
+          : blendedBenefit(svcAtM, ncSvcMonths, afcMonthly, arf, plan, config);
         const raisedAfc = applyRaises(afcMonthly, retDate, config.N, lastDayOfSvc);
         const raisesActive = raisedAfc > afcMonthly;
         const pensionWithRaises = (offElig === 'ineligible' || !raisesActive) ? null
-          : Math.floor(Math.round(raisedAfc * (svcYrs + svcMos / 12) * config.multiplier * arf * 100) / 100);
+          : blendedBenefit(svcAtM, ncSvcMonths, raisedAfc, arf, plan, config);
 
         if (slHours != null && slAsOf != null && offElig !== 'ineligible') {
           const accrualEnd   = lastDayOfSvc
@@ -1264,15 +1278,13 @@
           const projectedMo  = sickLeaveToMonths(
             slHours + slRate * Math.max(0, monthsBetween(slAsOf, accrualEnd))
           );
-          const calcPrimary = svc =>
-            Math.floor(Math.round(afcMonthly * (svc / 12) * config.multiplier * arf * 100) / 100);
-          pensionCurrentSL   = calcPrimary(svcAtM + currentMo);
-          pensionProjectedSL = calcPrimary(svcAtM + projectedMo);
+          // SL months credit to the hybrid portion: ncSvcMonths is unchanged,
+          // svcMonths grows; blendedBenefit subtracts NC from total to get hybrid.
+          pensionCurrentSL   = blendedBenefit(svcAtM + currentMo,   ncSvcMonths, afcMonthly, arf, plan, config);
+          pensionProjectedSL = blendedBenefit(svcAtM + projectedMo, ncSvcMonths, afcMonthly, arf, plan, config);
           if (raisesActive) {
-            const calcRaised = svc =>
-              Math.floor(Math.round(raisedAfc * (svc / 12) * config.multiplier * arf * 100) / 100);
-            pensionRaisesCurrentSL   = calcRaised(svcAtM + currentMo);
-            pensionRaisesProjectedSL = calcRaised(svcAtM + projectedMo);
+            pensionRaisesCurrentSL   = blendedBenefit(svcAtM + currentMo,   ncSvcMonths, raisedAfc, arf, plan, config);
+            pensionRaisesProjectedSL = blendedBenefit(svcAtM + projectedMo, ncSvcMonths, raisedAfc, arf, plan, config);
           }
         }
 
@@ -1775,10 +1787,12 @@
       const slAsOf   = slAsOfEl.value ? parseIsoDate(slAsOfEl.value) : null;
       if (!isNaN(slHours) && slHours <= 0)
         console.warn(`Sick leave hours (${slHours}) must be positive; ignoring.`);
+      const isHybridPlan = planEl.value === 'hybrid';
       const series  = calculateSeries({
         plan             : derivePlanKey(planEl.value, memDateEl.value),
         dob              : parseIsoDate(dobEl.value),
         enteredSvcMonths : (parseInt(svcYearsEl.value) || 0) * 12 + (parseInt(svcMonthsEl.value) || 0),
+        ncSvcMonths      : isHybridPlan ? (parseInt(ncSvcYearsEl.value) || 0) * 12 + (parseInt(ncSvcMonthsEl.value) || 0) : 0,
         asOfDate,
         lastDayOfSvc,
         afcMonthly       : parseFloat(manualAfcEl.value),

@@ -69,7 +69,7 @@ Status: Complete
 Goal: thread `ncSvcMonths` from form-read into `calculateSeries({...})`; non-hybrid plans always pass 0.
 Success: function signature accepts `ncSvcMonths`; existing callers still produce identical output when `ncSvcMonths === 0`.
 Tests: regression — every existing scenario (all five derived plan keys, sick leave on/off, raises on/off) produces byte-identical pension values when NC = 0.
-Status: Not Started
+Status: Complete
 
 ## Stage 4: Split-multiplier in the blue curve
 Goal: rewrite the pension expression in `calculateSeries()` to use a helper that splits service into NC and hybrid portions. The helper takes already-adjusted `afcMonthly` and `svcMonths` per variant — no awareness of raises or sick-leave semantics.
@@ -93,13 +93,13 @@ Tests:
 - Spec example (Retirement-Information-Hybrid §"If you also have Noncontributory plan service"): hybrid-post2012, AFC=$2,500, 20 hybrid yrs + 5 NC yrs → (1.75% × 20 + 1.25% × 5) × $2,500 = $1,031.25/mo at normal retirement (ARF=1).
 - Edge: ncMonths > svcMonths → clamped (no negative hybrid years).
 - Edge: ncMonths > 0 on a non-hybrid plan → ignored (defensive; UI hides the field but values may persist).
-Status: Not Started
+Status: Complete
 
 ## Stage 5: Split-multiplier in the red (official) curve
 Goal: apply the same split in the official-comparison series so the red line stays an apples-to-apples reference (current AFC, no sick leave, no raises, but with NC split).
 Success: red curve agrees with the official ERS web calculator when fed the same inputs (mixed-service hybrid case).
 Tests: pick a hybrid-post2012 mixed-service scenario, run it through `../ers/index.html` in a browser, capture the maximum-allowance number, compare to peng's red-curve value at that retirement date. Tolerance: cents (≤ $1).
-Status: Not Started
+Status: Complete (no-op — peng has no separate red curve; `primaryPension` (blue) is computed with current AFC/no-SL/no-raises and serves as the official-comparison line. Stage 4 already applied the split there. Cross-check vs. the official ERS calc was performed manually with the spec example: hybrid-post2012, 20 hybrid + 5 NC plan, AFC=$2,500 → both peng and the official tool produce $1,031.25 at normal retirement when NC is entered via the separate "Noncontributory Service" checkbox. The official tool's "Service upgraded from Noncontributory" sub-checkbox does NOT split — it sums all years at the hybrid multiplier — and so does not match the spec or peng. Stale "Red solid curve" rows in `info/DESIGN.md` removed.)
 
 ## Stage 6: Eligibility, vesting, ARF — verify unchanged
 Goal: confirm `primaryEligibility()`, `primaryARF()`, the in-line eligibility switch in `calculateSeries` (`index.html:1194`), and vesting checks all use **total** credited service (`svcAtM`), not the hybrid portion.

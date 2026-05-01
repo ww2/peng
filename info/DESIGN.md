@@ -24,11 +24,9 @@ configs, and eligibility rules live in `CLAUDE.md`; deferred features live in
 | Age penalty | 5%/yr (hybrid, contributory); 6%/yr (noncontributory) | Confirmed against official ERS calculator ARF lookup tables; source PDFs only documented 6% for noncontributory |
 | Penalty granularity | Whole years (floor) | Produces staircase curve; official calculator interpolates by month but whole-year approximation is close enough for planning |
 | Penalty reference age | Always the primary normal retirement age (65 for hybrid-post2012), regardless of service | The 60/30 alternative threshold only toggles eligibility (ARF=1); it does not lower the penalty basis — confirmed from official ARF tables |
-| Official ERS line | Red solid curve drawn alongside blue | Lets members compare own estimate to official calculator output for multiple dates at once |
 | Official ARF tables | Embedded as JS literal in `index.html`; source files in `ers/` kept for reference only | Single-file delivery constraint; tables are small enough to inline |
-| Official formula | `Math.floor(Math.round(afc × svc × mult × arf × 100) / 100)` | Matches `lgeRnd(..., 2)` + `Math.floor` in official source (`ers/_js/scripts/ers.calculator.js`) |
-| Two official age calculations | `officialArfAge` (days ≥ 15 rounds up to next month) for ARF table lookup; `officialEligAge` (no day-rounding) for eligibility thresholds | Official calculator uses two separate functions for these purposes; using the wrong one produces off-by-one-month errors |
-| Official line inputs | Uses current AFC; ignores sick leave and raise rate | Official calculator models neither; red line is a clean no-adjustments baseline for comparison |
+| Official formula | `Math.floor(Math.round(afc × svc × mult × arf × 100) / 100)` | Matches `lgeRnd(..., 2)` + `Math.floor` in official source (`ers/_js/scripts/ers.calculator.js`); the primary blue curve uses the same formula and serves as the apples-to-apples comparison line against the official tool |
+| Two official age calculations | `primaryArfAge` (days ≥ 15 rounds up to next month) for ARF table lookup; `primaryEligAge` (no day-rounding) for eligibility thresholds | Official calculator uses two separate functions for these purposes; using the wrong one produces off-by-one-month errors |
 | Retirement option | Maximum Allowance only | Survivor reductions require actuarial factors not in source PDFs |
 | Plan scope | All three plans (5 variants) | Minimal added complexity; maximises usefulness |
 | Mixed service | Not supported | Additive formula is known; UI and eligibility logic need more design; tracked in TODO.md |
