@@ -158,6 +158,35 @@ only on the blue (peng-primary) curve.
 
 ---
 
+## Projected Raises — Currently Suppressed
+
+The contractual-raises feature (the projected-raises table, the "Projected
+raises do not apply" override, and the four purple raise-based chart curves
+plus their estimation-table columns) is hidden in the UI pending resolution
+of a per-plan AFC composition issue.
+
+**The problem:** most plans compute AFC from regular pay only — overtime and
+differentials are excluded. Noncontributory, however, includes overtime (and
+"overtime and bonuses" per the spec) in AFC. The raise table represents
+across-the-board contractual percentage bumps to base pay, so blending those
+raises into AFC the same way for all plans understates the noncontributory
+AFC growth (raises lift base pay but the AFC is denominated against a larger
+overtime-inclusive figure). Until the right per-plan blending rule is worked
+out, showing one raise-adjusted curve risks being silently wrong for
+noncontributory members.
+
+**What's suppressed:**
+- `#group-contractual-input` fieldset hidden
+- `showRaises` hard-coded to `false` at both the calculate-flow site
+  (`index.html:1941`) and inside `drawChart` (`index.html:2349`)
+
+**What's preserved:** `calculateSeries` still computes
+`pensionWithRaises` / `pensionRaisesCurrentSL` / `pensionRaisesProjectedSL`
+and `applyRaises` / the `RAISES` table are still in source. Re-enabling is a
+revert of the three edits above once the per-plan rule is settled.
+
+---
+
 ## Out of Scope
 
 These were considered and explicitly deferred. Captured here so the choice

@@ -408,7 +408,10 @@
   </fieldset>
 
   <!-- ── Contractual adjustments (read-only) ──────────────────── -->
-  <fieldset id="group-contractual-input">
+  <!-- Temporarily suppressed: raises interact with AFC differently across plans
+       (noncontributory includes overtime in AFC; others don't). Re-enable once
+       the per-plan raise/AFC interaction is settled. -->
+  <fieldset id="group-contractual-input" hidden>
     <legend>Contractual adjustments</legend>
     <div class="form-rows">
 
@@ -1937,7 +1940,8 @@
         && !series.some(d => d.pensionWithRaises !== null);
       applyRaisesNALock(noRaisesApply);
       const raisesNA     = raisesNaEl.checked;
-      const showRaises   = !isSeparated && !raisesNA;
+      // Raise-based curves suppressed pending per-plan AFC/overtime resolution.
+      const showRaises   = false;
       drawChart(series, { hasSL, isSeparated, raisesNA });
       drawSeriesTable(series, { hasSL, showRaises });
     }
@@ -2346,7 +2350,8 @@
     }
     // ── Chart ────────────────────────────────────────────────────
     function drawChart(series = null, { hasSL = false, isSeparated = false, raisesNA = false } = {}) {
-      const showRaises = !isSeparated && !raisesNA;
+      // Raise-based curves suppressed pending per-plan AFC/overtime resolution.
+      const showRaises = false;
       const svg = d3.select('#chart-svg');
       const W   = svg.node().clientWidth;
       const H   = svg.node().clientHeight;
