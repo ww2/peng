@@ -412,16 +412,11 @@
     <legend>Contractual adjustments</legend>
     <div class="form-rows">
 
-      <div class="form-row" style="margin-bottom:0.25rem;">
-        <label style="font-size:0.8rem; display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
-          <input type="checkbox" id="raises-na"> <span id="raises-na-text">Projected raises do not apply</span>
-        </label>
-      </div>
-
-      <div class="form-row" id="raises-table-row">
+      <div class="form-row" id="raises-table-row" style="align-items: flex-start;">
         <span class="form-label">Projected raises</span>
         <table id="raises-table">
           <tbody>
+            <tr><td>2025-07-01</td><td>3.50%</td></tr>
             <tr><td>2026-07-01</td><td>3.79%</td></tr>
             <tr><td>2027-07-01</td><td>4.00%</td></tr>
             <tr><td>2028-07-01</td><td>4.00%</td></tr>
@@ -429,11 +424,23 @@
         </table>
       </div>
 
+      <div class="form-row" id="raises-applies-row" style="font-size: 0.7rem; color: #888;">
+        applies to BUs 01, 02, 04, 07, 08, 10
+      </div>
+
+      <div class="form-row" style="margin-bottom:0.25rem;">
+        <label style="font-size:0.8rem; display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
+          <input type="checkbox" id="raises-na"> <span id="raises-na-text">Projected raises do not apply</span>
+        </label>
+      </div>
+
     </div>
   </fieldset>
   <script>
     document.getElementById('raises-na').addEventListener('change', function() {
-      document.getElementById('raises-table-row').hidden = this.checked;
+      const hide = this.checked;
+      document.getElementById('raises-table-row').hidden = hide;
+      document.getElementById('raises-applies-row').hidden = hide;
     });
   </script>
 
