@@ -58,6 +58,7 @@
     #picker-path:empty { display: none; }
     .form-row > select,
     .form-row > input,
+    .form-row input[type="date"],
     .input-row input {
       font-family: monospace;
       font-size: 0.9rem;
@@ -108,23 +109,28 @@
       grid-area: group;
       justify-self: start;
     }
-    /* Total pair with leading "As of" date column. Forcing labels to row 2
-       and inputs to row 3 keeps the (1,1) cell empty so "Total" sits only
-       over the Years/Months columns. */
-    .svc-pair--with-asof {
-      grid-template-columns: auto auto auto;
-      grid-template-areas: none;
+    /* Standalone "As of" slot at the leftmost of svc-pair-row. Stays anchored
+       on the left; bottom-aligns with the inputs of the credited-service pairs
+       via the parent's `align-items: end`. */
+    .svc-asof {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
     }
-    .svc-pair--with-asof > .svc-hdr--group {
-      grid-area: auto;
-      grid-row: 1;
-      grid-column: 2 / -1;
+    .svc-asof > label { font-size: 0.8rem; color: #555; }
+    .svc-asof > input[type="date"] {
+      font-family: monospace; font-size: 0.9rem; padding: 0.25rem;
     }
-    .svc-pair--with-asof > label { grid-row: 2; }
-    .svc-pair--with-asof > input { grid-row: 3; }
     .no-spin::-webkit-inner-spin-button,
-    .no-spin::-webkit-outer-spin-button { -webkit-appearance: none; }
-    .no-spin { -moz-appearance: textfield; appearance: textfield; }
+    .no-spin::-webkit-outer-spin-button,
+    input[type="number"][readonly]::-webkit-inner-spin-button,
+    input[type="number"][readonly]::-webkit-outer-spin-button { -webkit-appearance: none; }
+    .no-spin,
+    input[type="number"][readonly] { -moz-appearance: textfield; appearance: textfield; }
+    /* Make read-only number inputs feel like derived displays in Firefox: no
+       click focus, no text selection. Costs click-to-copy, but the value is
+       never authoritative here (it's a sum of the Hybrid + NC pairs). */
+    input[type="number"][readonly] { pointer-events: none; user-select: none; }
     .svc-grid > label, .svc-grid > .svc-hdr,
     .sl-grid  > label, .sl-grid  > .svc-hdr,
     .svc-pair > label, .svc-pair > .svc-hdr {
@@ -136,6 +142,16 @@
       font-family: monospace; font-size: 0.9rem; padding: 0.25rem; width: 100%;
     }
     input[type="date"] { max-width: 16ch; }
+
+    input:read-only,
+    textarea:read-only {
+      border-color: transparent;
+      cursor: default;
+      background-color: #f9f9f9; /* light gray */
+      color: #555;               /* de-emphasizes text */
+    }
+
+
 
     /* ── Manual AFC fields ── */
     #manual-afc, #nonreg-afc { width: 11ch; }
@@ -213,7 +229,7 @@
       margin-bottom: 1.25rem;
     }
 
-    #graph-btn, #clear-btn {
+    #graph-btn, #clear-btn, #picker-btn, #cancel-btn {
       font-family: monospace;
       font-size: 0.95rem;
       padding: 0.35rem 1rem;
@@ -362,14 +378,17 @@
       <div class="form-row form-row--subgrid">
         <span class="form-label">Credited service</span>
         <div class="svc-pair-row">
-          <div class="svc-pair svc-pair--with-asof">
-            <span class="svc-hdr svc-hdr--group">Total</span>
+          <div class="svc-asof">
             <label for="svc-as-of">As of</label>
-            <label for="svc-years">Years</label>
-            <label for="svc-months">Months</label>
             <input type="date" id="svc-as-of">
-            <input type="number" id="svc-years" min="0" max="50" step="1" placeholder="0" style="width: 6.5ch">
-            <input type="number" id="svc-months" min="0" max="11" step="1" placeholder="0" style="width: 5.5ch">
+          </div>
+
+          <div class="svc-pair" id="hybrid-svc-row" hidden>
+            <span class="svc-hdr svc-hdr--group">Hybrid</span>
+            <label for="hybrid-svc-years">Years</label>
+            <label for="hybrid-svc-months">Months</label>
+            <input type="number" id="hybrid-svc-years" min="0" max="50" step="1" placeholder="0" style="width: 6.5ch">
+            <input type="number" id="hybrid-svc-months" min="0" max="11" step="1" placeholder="0" style="width: 5.5ch">
           </div>
 
           <div class="svc-pair" id="nc-svc-row" hidden>
@@ -378,6 +397,14 @@
             <label for="nc-svc-months">Months</label>
             <input type="number" id="nc-svc-years" min="0" max="50" step="1" placeholder="0" style="width: 6.5ch">
             <input type="number" id="nc-svc-months" min="0" max="11" step="1" placeholder="0" style="width: 5.5ch">
+          </div>
+
+          <div class="svc-pair">
+            <span class="svc-hdr svc-hdr--group">Total</span>
+            <label for="svc-years">Years</label>
+            <label for="svc-months">Months</label>
+            <input type="number" id="svc-years" min="0" max="50" step="1" placeholder="0" style="width: 6.5ch">
+            <input type="number" id="svc-months" min="0" max="11" step="1" placeholder="0" style="width: 5.5ch">
           </div>
         </div>
       </div>
@@ -562,6 +589,9 @@
     const memDateEl        = document.getElementById('mem-date');
     const svcYearsEl       = document.getElementById('svc-years');
     const svcMonthsEl      = document.getElementById('svc-months');
+    const hybridSvcRowEl   = document.getElementById('hybrid-svc-row');
+    const hybridSvcYearsEl = document.getElementById('hybrid-svc-years');
+    const hybridSvcMonthsEl= document.getElementById('hybrid-svc-months');
     const ncSvcRowEl       = document.getElementById('nc-svc-row');
     const ncSvcYearsEl     = document.getElementById('nc-svc-years');
     const ncSvcMonthsEl    = document.getElementById('nc-svc-months');
@@ -1270,12 +1300,13 @@
     }
 
     // Hybrid mixed-service benefit: NC-plan years get the 1.25% multiplier
-    // and the rest get the hybrid multiplier (PLAN.md Stage 4). For non-hybrid
-    // plans, ncMonths is ignored and the formula collapses to the single-multiplier
-    // case. ncMonths is clamped to svcMonths so hybridYrs never goes negative.
+    // and the rest get the hybrid multiplier. For non-hybrid plans, ncMonths
+    // is ignored and the formula collapses to the single-multiplier case.
+    // Caller invariant: ncMonths ≤ svcMonths (guaranteed by the form, where
+    // Total = Hybrid + NC and Hybrid ≥ 0).
     function blendedBenefit(svcMonths, ncMonths, afc, arf, plan, config) {
       const totalYrs  = svcMonths / 12;
-      const ncYrs     = Math.min(ncMonths, svcMonths) / 12;
+      const ncYrs     = ncMonths / 12;
       const hybridYrs = totalYrs - ncYrs;
       const isHybrid  = plan.startsWith('hybrid');
       const benefit   = isHybrid
@@ -1866,7 +1897,28 @@
       else { drawChart(); drawSeriesTable(null); }
     }
 
-    [dobEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
+    // Total credited service is the sum of the Hybrid and Noncontributory
+    // pairs (PLAN.md Stage 1). Months carry: any sum ≥ 12 rolls one year up.
+    // Each months input is bounded 0..11 by its `min`/`max` attrs. Zero
+    // components render as empty so the field's `0` placeholder shows.
+    function recomputeTotal() {
+      const hy = parseInt(hybridSvcYearsEl.value)  || 0;
+      const hm = parseInt(hybridSvcMonthsEl.value) || 0;
+      const ny = parseInt(ncSvcYearsEl.value)      || 0;
+      const nm = parseInt(ncSvcMonthsEl.value)     || 0;
+      const monthsSum = hm + nm;
+      const carry     = monthsSum >= 12 ? 1 : 0;
+      const ty        = hy + ny + carry;
+      const tm        = monthsSum - 12 * carry;
+      svcYearsEl.value  = ty || '';
+      svcMonthsEl.value = tm || '';
+    }
+
+    [hybridSvcYearsEl, hybridSvcMonthsEl, ncSvcYearsEl, ncSvcMonthsEl].forEach(el =>
+      el.addEventListener('input', recomputeTotal)
+    );
+
+    [dobEl, svcYearsEl, svcMonthsEl, hybridSvcYearsEl, hybridSvcMonthsEl, ncSvcYearsEl, ncSvcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
       el.addEventListener('input', maybeCalculate)
     );
     stillActiveEl.addEventListener('change', syncLastDayState);
@@ -1974,7 +2026,7 @@
         .forEach(el => { el.value = ''; });
       stillActiveEl.checked = true;
       syncLastDayState();
-      syncNcSvcVisibility();
+      syncSvcSplitVisibility();
       syncNonregAfcVisibility();
       updateManualAfcNote();
       slRateEl.value = '14';
@@ -2070,7 +2122,7 @@
 
       prevPlanValue = newVal;
       earningsFieldset.disabled = !newVal;
-      syncNcSvcVisibility();
+      syncSvcSplitVisibility();
       syncNonregAfcVisibility();
       const dpResult = computeAndFillAfc(derivePlanKey(newVal, memDateEl.value));
       if (dpResult) {
@@ -2162,14 +2214,36 @@
       lastDayEl.min = svcAsOfEl.value || '';
     }
 
-    // NC mixed-service inputs apply only to hybrid plans (PLAN.md Stage 1).
-    // Switching to a non-hybrid plan hides the row and clears its values.
-    function syncNcSvcVisibility() {
+    // The Hybrid + Noncontributory split applies only to hybrid plans
+    // (PLAN.md Stage 2). For hybrid plans, both rows are visible and the
+    // Total inputs become read-only (Total = Hybrid + NC, recomputed on
+    // every input). Switching to a non-hybrid plan hides both rows, clears
+    // their values, and re-enables free-edit on the Total inputs while
+    // preserving whatever figure was last displayed there.
+    //
+    // When activating hybrid, the Hybrid pair is derived from the current
+    // Total minus the current NC (with borrow), so this works for plan
+    // switches (NC=0 ⇒ Hybrid=Total) and URL pre-fills with NC>0
+    // (Hybrid = Total − NC) alike. Negative results are clamped to 0/0;
+    // the Stage-3 URL banner will surface that case as an error.
+    function syncSvcSplitVisibility() {
       const isHybrid = planEl.value === 'hybrid';
-      ncSvcRowEl.hidden = !isHybrid;
-      if (!isHybrid) {
-        ncSvcYearsEl.value  = '';
-        ncSvcMonthsEl.value = '';
+      hybridSvcRowEl.hidden = !isHybrid;
+      ncSvcRowEl.hidden     = !isHybrid;
+      svcYearsEl.readOnly   = isHybrid;
+      svcMonthsEl.readOnly  = isHybrid;
+      if (isHybrid) {
+        const totalAll  = (parseInt(svcYearsEl.value)  || 0) * 12 + (parseInt(svcMonthsEl.value)  || 0);
+        const ncAll     = (parseInt(ncSvcYearsEl.value) || 0) * 12 + (parseInt(ncSvcMonthsEl.value) || 0);
+        const hybridAll = Math.max(0, totalAll - ncAll);
+        hybridSvcYearsEl.value  = Math.floor(hybridAll / 12) || '';
+        hybridSvcMonthsEl.value = (hybridAll % 12) || '';
+        recomputeTotal();
+      } else {
+        hybridSvcYearsEl.value  = '';
+        hybridSvcMonthsEl.value = '';
+        ncSvcYearsEl.value      = '';
+        ncSvcMonthsEl.value     = '';
       }
     }
 
@@ -2241,7 +2315,7 @@
       reloadLinkBottom.href = url + '#reload-bar-bottom';
     }
 
-    [dobEl, memDateEl, svcYearsEl, svcMonthsEl, ncSvcYearsEl, ncSvcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
+    [dobEl, memDateEl, svcYearsEl, svcMonthsEl, hybridSvcYearsEl, hybridSvcMonthsEl, ncSvcYearsEl, ncSvcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
       el.addEventListener('input', updateReloadLink)
     );
     stillActiveEl.addEventListener('change', updateReloadLink);
@@ -2286,22 +2360,26 @@
         return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
       }
 
-      function addError(msg, el) {
+      function addError(msg, elOrEls) {
         const li = document.createElement('li');
         li.textContent = msg;
         bannerList.appendChild(li);
-        if (el) {
-          el.classList.add('input-error');
-          const clear = () => {
+        const els = elOrEls ? (Array.isArray(elOrEls) ? elOrEls : [elOrEls]) : [];
+        if (!els.length) return;
+        const clear = () => {
+          els.forEach(el => {
             el.classList.remove('input-error');
-            li.remove();
             el.removeEventListener('input',  clear);
             el.removeEventListener('change', clear);
-            if (!bannerList.children.length) banner.hidden = true;
-          };
+          });
+          li.remove();
+          if (!bannerList.children.length) banner.hidden = true;
+        };
+        els.forEach(el => {
+          el.classList.add('input-error');
           el.addEventListener('input',  clear);
           el.addEventListener('change', clear);
-        }
+        });
       }
 
       const p = new URLSearchParams(window.location.search);
@@ -2364,9 +2442,34 @@
         if (!p.has('svcAsOf') && !svcAsOfEl.value) svcAsOfEl.value = lastDayEl.value;
       }
 
+      // NC > Total cross-check for hybrid plans (PLAN.md Stage 3). Hybrid =
+      // Total − NC; if NC exceeds Total the derived Hybrid would be negative,
+      // which `syncSvcSplitVisibility` will silently clamp to 0/0 (and Total
+      // will end up = NC after recompute). Surface that mismatch here so the
+      // user notices rather than seeing an unexplained Total snap.
+      if (planEl.value === 'hybrid'
+          && (svcYearsEl.value || svcMonthsEl.value)
+          && (ncSvcYearsEl.value || ncSvcMonthsEl.value)) {
+        const totalAll = (parseInt(svcYearsEl.value)  || 0) * 12 + (parseInt(svcMonthsEl.value)  || 0);
+        const ncAll    = (parseInt(ncSvcYearsEl.value) || 0) * 12 + (parseInt(ncSvcMonthsEl.value) || 0);
+        if (ncAll > totalAll) {
+          const ty = svcYearsEl.value  || '0';
+          const tm = svcMonthsEl.value || '0';
+          const ny = ncSvcYearsEl.value  || '0';
+          const nm = ncSvcMonthsEl.value || '0';
+          addError(
+            `noncontributory service (${ny}y ${nm}m) exceeds total credited service (${ty}y ${tm}m)`,
+            [svcYearsEl, svcMonthsEl, ncSvcYearsEl, ncSvcMonthsEl]
+          );
+        }
+      }
+
       // Unknown params (likely typos)
       for (const key of p.keys()) {
-        if (!SUPPORTED_PARAMS.includes(key)) {
+        if (SUPPORTED_PARAMS.includes(key)) continue;
+        if (key === 'hybridSvcYears' || key === 'hybridSvcMonths') {
+          addError(`"${key}" is not a URL param — the Hybrid pair is derived from svcYears/svcMonths minus ncSvcYears/ncSvcMonths`, null);
+        } else {
           addError(`unknown parameter "${key}"`, null);
         }
       }
@@ -2377,7 +2480,7 @@
       prevMemDateValue          = memDateEl.value;
       earningsFieldset.disabled = !planEl.value;
       syncLastDayState();
-      syncNcSvcVisibility();
+      syncSvcSplitVisibility();
       syncNonregAfcVisibility();
       updateManualAfcNote();
       updateReloadLink();

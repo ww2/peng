@@ -20,7 +20,7 @@ Supported params (URL pre-fill block at `index.html:2185+`): `plan`, `dob`, `mem
 
 Four fieldsets in `index.html:290-451`:
 
-1. **Required information** — plan (3-option dropdown: hybrid / contributory / noncontributory), DOB, ERS membership date (`memDate`), credited service (years/months), optional "of which, noncontributory" sub-row (visible only when plan = hybrid; drives the NC mixed-service split), service-as-of date, last day of service (or "Still active" checkbox)
+1. **Required information** — plan (3-option dropdown: hybrid / contributory / noncontributory), DOB, ERS membership date (`memDate`), credited service (an as-of date anchored at the leftmost slot of `svc-pair-row` regardless of plan, plus one or more years/months pairs to its right). For hybrid plans, three pairs sit in that row: `Hybrid`, `Noncontributory`, and a read-only `Total` computed as `Hybrid + NC` with months carry. For non-hybrid plans, only the `Total` pair is visible and is itself user-editable. Last day of service (or "Still active" checkbox) follows.
 2. **Optional adjustments** — sick leave hours / as-of date / accrual rate (default 14 hrs/mo)
 3. **Contractual adjustments** — read-only `RAISES` table (`index.html:561`) with a "Projected raises do not apply" override checkbox
 4. **Earnings data** — manual monthly AFC OR paystub directory picker (DP solver writes the computed AFC into the manual field)
@@ -45,7 +45,7 @@ Eligibility, ARF lookup, AFC mode/N, and COLA all read from the derived key. Cro
 - **ARF tables** — `PRIMARY_ARF_TABLES` at `index.html:571`, copied verbatim from the official ERS calculator's `ers.data.js` (tier1) and `ers.dataNew.js` (tier2)
 - **Eligibility / ARF lookup** — `primaryArfAge` (`:680`, days≥15 rounds up), `primaryEligAge` (`:694`), `primaryEligibility` (`:706`, returns `'regular' | 'early' | 'ineligible'`), `primaryARF` (`:737`)
 - **Pension series** — `calculateSeries` at `index.html:1225` accepts `ncSvcMonths` (defaults 0). Per-month rows from next month → 10 years past first normal retirement (50-yr ceiling). Each row carries `primaryPension`, `pensionCurrentSL`, `pensionProjectedSL`, `pensionWithRaises`, `pensionRaisesCurrentSL`, `pensionRaisesProjectedSL`. Already-separated members and future committed `lastDayOfSvc` snap eligible rows to a single value.
-- **Pension formula helper** — `blendedBenefit(svcMonths, ncMonths, afc, arf, plan, config)` at `index.html:1211`. Splits hybrid service into NC-portion (1.25%) and hybrid-portion (config.multiplier); non-hybrid plans use the uniform formula. All six pension expressions in `calculateSeries` (primary, ±raises, ±SL variants) call this helper. SL months credit to the hybrid portion.
+- **Pension formula helper** — `blendedBenefit(svcMonths, ncMonths, afc, arf, plan, config)` at `index.html:1290`. Splits hybrid service into NC-portion (1.25%) and hybrid-portion (config.multiplier); non-hybrid plans use the uniform formula. Caller invariant: `ncMonths ≤ svcMonths` (the form's read-only Total = Hybrid + NC guarantees this). All six pension expressions in `calculateSeries` (primary, ±raises, ±SL variants) call this helper. SL months credit to the hybrid portion.
 - **Date utilities** — `parseDate` (`:1122`), `addMonths` (`:1127`), `addDays` (`:1136`), `monthsBetween` (`:1151`), `fractionalAge` (`:1158`), `serviceAtMonth` (`:1167`)
 - **Sick leave → months** — `sickLeaveToMonths` at `index.html:1183`. Spec: ≥60 days (480 hrs) required; 60d→3mo, each further 20d→1mo, remainder ≥10d→1mo
 - **Raises** — `applyRaises` at `index.html:1196` blends each scheduled raise linearly across the plan's N-year averaging window, capped at `lastDayOfSvc` if set
@@ -61,7 +61,7 @@ const benefit = isHybrid
   : afc * totalYrs * config.multiplier * arf;
 return Math.floor(Math.round(benefit * 100) / 100);
 ```
-For non-hybrid plans `ncMonths` is ignored; for hybrid plans the NC portion is clamped to total service so it can't drive the hybrid portion negative.
+For non-hybrid plans `ncMonths` is ignored. The form guarantees `ncMonths ≤ svcMonths` (the Total pair is read-only and computed as `Hybrid + NC`), so the helper trusts that invariant and does no runtime clamping.
 
 ## Plan Eligibility Rules
 
