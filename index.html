@@ -137,8 +137,18 @@
     }
     input[type="date"] { max-width: 16ch; }
 
-    /* ── Manual AFC field ── */
-    #manual-afc { width: 11ch; }
+    /* ── Manual AFC fields ── */
+    #manual-afc, #nonreg-afc { width: 11ch; }
+    .svc-pair--afc {
+      grid-template-columns: auto;
+      grid-template-areas:
+        "group"
+        "input";
+    }
+    .svc-pair--afc > input {
+      grid-area: input;
+      font-family: monospace; font-size: 0.9rem; padding: 0.25rem;
+    }
     #manual-afc-note { margin-top: 0.4rem; font-size: 0.85rem; color: #c60; max-width: 36rem; }
 
     /* ── Projected raises table ── */
@@ -454,9 +464,18 @@
 
     <!-- Option B: manual AFC -->
     <div id="group-earnings-input-manual">
-      <div class="form-row">
+      <div class="form-row form-row--subgrid">
         <label class="form-label" for="manual-afc">Monthly AFC ($)</label>
-        <input type="text" inputmode="decimal" id="manual-afc" placeholder="e.g. 4413.00">
+        <div class="svc-pair-row">
+          <div class="svc-pair svc-pair--afc">
+            <span class="svc-hdr svc-hdr--group">Regular</span>
+            <input type="text" inputmode="decimal" id="manual-afc" placeholder="e.g. 4413.00">
+          </div>
+          <div class="svc-pair svc-pair--afc" id="nonreg-afc-pair" hidden>
+            <span class="svc-hdr svc-hdr--group">Non-regular</span>
+            <input type="text" inputmode="decimal" id="nonreg-afc" placeholder="e.g. 0.00">
+          </div>
+        </div>
       </div>
       <div id="manual-afc-note" hidden></div>
     </div>
@@ -554,6 +573,8 @@
     const raisesTableRowEl = document.getElementById('raises-table-row');
     const manualAfcEl      = document.getElementById('manual-afc');
     const manualAfcNoteEl  = document.getElementById('manual-afc-note');
+    const nonregAfcEl      = document.getElementById('nonreg-afc');
+    const nonregAfcPairEl  = document.getElementById('nonreg-afc-pair');
     const earningsFieldset = document.getElementById('group-earnings-input');
     const statusLine       = document.getElementById('status-line');
     const reloadLink       = document.getElementById('reload-link');
@@ -1852,6 +1873,7 @@
     stillActiveEl.addEventListener('change', maybeCalculate);
     raisesNaEl.addEventListener('change', maybeCalculate);
     manualAfcEl.addEventListener('change', maybeCalculate);
+    nonregAfcEl.addEventListener('change', maybeCalculate);
 
     // Renders a table of the first 48 rows of the chart series with one column
     // per visible curve. Columns mirror the chart's hasSL/showRaises gating so
@@ -1948,11 +1970,12 @@
 
     function runClear() {
       // Form inputs
-      [planEl, dobEl, memDateEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, slAsOfEl]
+      [planEl, dobEl, memDateEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, nonregAfcEl, slHoursEl, slAsOfEl]
         .forEach(el => { el.value = ''; });
       stillActiveEl.checked = true;
       syncLastDayState();
       syncNcSvcVisibility();
+      syncNonregAfcVisibility();
       updateManualAfcNote();
       slRateEl.value = '14';
 
@@ -2048,6 +2071,7 @@
       prevPlanValue = newVal;
       earningsFieldset.disabled = !newVal;
       syncNcSvcVisibility();
+      syncNonregAfcVisibility();
       const dpResult = computeAndFillAfc(derivePlanKey(newVal, memDateEl.value));
       if (dpResult) {
         const existing = debugBody.querySelector('.windows-section');
@@ -2083,6 +2107,7 @@
           else if (debugBody.children.length) debugBody.appendChild(section);
         }
         updateManualAfcNote();
+        syncNonregAfcVisibility();
         updateReloadLink();
         maybeCalculate();
         return;
@@ -2090,6 +2115,7 @@
 
       prevMemDateValue = newVal;
       updateManualAfcNote();
+      syncNonregAfcVisibility();
       updateReloadLink();
       maybeCalculate();
     });
@@ -2145,6 +2171,17 @@
         ncSvcYearsEl.value  = '';
         ncSvcMonthsEl.value = '';
       }
+    }
+
+    // Non-regular AFC field applies only to mode: 'total' plans. Tier (and
+    // therefore mode) depends on memDate, so we go through derivePlanKey
+    // rather than gating on the dropdown alone. The value itself is preserved
+    // when the pair is hidden — flipping back to a mode: 'total' plan
+    // restores it.
+    function syncNonregAfcVisibility() {
+      const planKey = derivePlanKey(planEl.value, memDateEl.value);
+      const config  = planKey ? PLAN_CONFIGS[planKey] : null;
+      nonregAfcPairEl.hidden = !(config && config.mode === 'total');
     }
 
     // Pre-1971 dual-method members entering AFC manually (no paystubs) get
@@ -2210,11 +2247,12 @@
     stillActiveEl.addEventListener('change', updateReloadLink);
     raisesNaEl.addEventListener('change', updateReloadLink);
     manualAfcEl.addEventListener('change', updateReloadLink);
+    nonregAfcEl.addEventListener('change', updateReloadLink);
 
     function commitAfc(e) {
       if (e.type === 'keydown' && e.key !== 'Enter') return;
       if (e.type === 'input'   && e.inputType === 'deleteByCut') {
-        manualAfcEl.value = '';
+        e.target.value = '';
         updateReloadLink();
         drawChart();
         return;
@@ -2225,6 +2263,8 @@
     }
     manualAfcEl.addEventListener('keydown', commitAfc);
     manualAfcEl.addEventListener('input',   commitAfc);
+    nonregAfcEl.addEventListener('keydown', commitAfc);
+    nonregAfcEl.addEventListener('input',   commitAfc);
 
     // ── URL parameter pre-fill ────────────────────────────────────
     // Supported params: plan, dob, memDate, svcYears, svcMonths, ncSvcYears, ncSvcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate
@@ -2338,6 +2378,7 @@
       earningsFieldset.disabled = !planEl.value;
       syncLastDayState();
       syncNcSvcVisibility();
+      syncNonregAfcVisibility();
       updateManualAfcNote();
       updateReloadLink();
       // Registered AFTER Stage-4 addError clear listeners so the range-
