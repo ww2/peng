@@ -604,15 +604,25 @@
     const contractualGroupEl = document.getElementById('group-contractual-input');
     const manualAfcEl      = document.getElementById('manual-afc');
 
-    // Populate the projected-raises table from RAISES (defined in lib/pension.js)
+    // Render the projected-raises table from RAISES (defined in lib/pension.js)
     // so the displayed table can never drift from the data the projector uses.
-    raisesTableBodyEl.innerHTML = RAISES.map(r => {
-      const m = String(r.date.getMonth() + 1).padStart(2, '0');
-      const d = String(r.date.getDate()).padStart(2, '0');
-      const date = `${r.date.getFullYear()}-${m}-${d}`;
-      const rate = `${(r.rate * 100).toFixed(2)}%`;
-      return `<tr><td>${date}</td><td>${rate}</td></tr>`;
-    }).join('');
+    // Hides raises whose date ≤ `boundary` — those are already reflected in
+    // the AFC base (when paystubs span them) and aren't applied by the
+    // projector. Default boundary is today's first-of-month; the paystub
+    // load path passes the stream-end month so the table matches what the
+    // projector actually applies.
+    function renderRaisesTable(boundary) {
+      const now = new Date();
+      const cutoff = boundary ?? new Date(now.getFullYear(), now.getMonth(), 1);
+      raisesTableBodyEl.innerHTML = RAISES.filter(r => r.date > cutoff).map(r => {
+        const m = String(r.date.getMonth() + 1).padStart(2, '0');
+        const d = String(r.date.getDate()).padStart(2, '0');
+        const date = `${r.date.getFullYear()}-${m}-${d}`;
+        const rate = `${(r.rate * 100).toFixed(2)}%`;
+        return `<tr><td>${date}</td><td>${rate}</td></tr>`;
+      }).join('');
+    }
+    renderRaisesTable();
     const manualAfcNoteEl  = document.getElementById('manual-afc-note');
     const earningsFieldset = document.getElementById('group-earnings-input');
     const statusLine       = document.getElementById('status-line');

@@ -140,10 +140,13 @@ test('projectAfcAtRetirement', async (t) => {
   });
 
   await t.test('2. flat stream + saturated single raise → base × (1+r) exactly', () => {
+    // Raise date must be > stream end (Dec 2025) — past raises are filtered
+    // out as already-baked-into-base; this fixture exercises the future-raise
+    // path where saturation is meaningful.
     const afc = projectAfcAtRetirement({
       stream: flatStream(2016, 0, 120, 5000, 5000),  // Jan 2016 – Dec 2025
       retDate:      new Date(2029, 11, 1),           // 48 future months at 5250
-      raises: [{ date: new Date(2018, 0, 1), rate: 0.05 }],
+      raises: [{ date: new Date(2026, 0, 1), rate: 0.05 }],
       N: 3,
       mode: 'regular',
       lastDayOfSvc: null,
@@ -196,9 +199,13 @@ test('projectAfcAtRetirement', async (t) => {
   });
 
   await t.test('6. equivalence with applyRaises on saturated module RAISES', () => {
+    // Stream must end before the earliest RAISES entry so that ALL of them
+    // are "future" relative to streamEnd — otherwise the projector's past-
+    // raise filter would skip some entries while applyRaises (no filter)
+    // applies all, breaking equivalence.
     const base = 5000;
     const retDate = new Date(2032, 0, 1);            // ≥ last raise (2028-07-01) + N×12
-    const stream = flatStream(2016, 0, 120, base, base);
+    const stream = flatStream(2014, 0, 120, base, base);  // Jan 2014 – Dec 2023
     const projected = projectAfcAtRetirement({
       stream,
       retDate,
@@ -232,6 +239,27 @@ test('projectAfcAtRetirement', async (t) => {
       raises: RAISES, N: 5, mode: 'regular', lastDayOfSvc: null,
     });
     assert.equal(afc, null);
+  });
+
+  await t.test('9. past raise during coverage → not double-applied', () => {
+    // Real paystubs from after a raise already reflect that raise in their
+    // values, so `base` (last paystub's regular pay) has it baked in.
+    // Multiplying by the raise again for future months would double-count.
+    // Stream: 6 months pre-raise at 5000, 18 months post-raise at 5250.
+    const stream = [];
+    for (let i = 0; i < 6;  i++) stream.push({ month: new Date(2024, i,     1), regular: 5000, total: 5000 });
+    for (let i = 0; i < 18; i++) stream.push({ month: new Date(2024, 6 + i, 1), regular: 5250, total: 5250 });
+    const afc = projectAfcAtRetirement({
+      stream,
+      retDate:      new Date(2027, 11, 1),
+      raises: [{ date: new Date(2024, 6, 1), rate: 0.05 }],
+      N: 1,
+      mode: 'regular',
+      lastDayOfSvc: null,
+    });
+    // Expected 5250 (no future raises after stream end). Pre-fix returned
+    // 5250 * 1.05 = 5512.50.
+    assert.equal(afc, 5250);
   });
 });
 
@@ -286,6 +314,9 @@ test('calculateSeries: paystubStream wiring', async (t) => {
     const row = series.find(r => r.retDate >= new Date(2033, 6, 1) && r.pensionWithRaises != null);
     assert.ok(row, 'expected at least one saturated row with pensionWithRaises set');
     // Reconstruct what the legacy applyRaises path would have produced.
+    // Pass streamEnd so applyRaises filters past raises consistently with
+    // the projector — otherwise the equivalence breaks when RAISES contains
+    // entries that fall within the stream's coverage.
     const plan = 'hybrid-post2012';
     const config = PLAN_CONFIGS[plan];
     const dob = new Date(1960, 0, 1);
@@ -294,7 +325,8 @@ test('calculateSeries: paystubStream wiring', async (t) => {
     const arfAge  = primaryArfAge(dob, row.retDate);
     const offElig = primaryEligibility(plan, eligAge, Math.floor(svcAtM / 12));
     const arf     = primaryARF(offElig, plan, arfAge.year, arfAge.month);
-    const legacyRaisedAfc = applyRaises(5000, row.retDate, config.N, null);
+    const streamEnd = stream[stream.length - 1].month;
+    const legacyRaisedAfc = applyRaises(5000, row.retDate, config.N, null, streamEnd);
     const expected = blendedBenefit(svcAtM, 0, legacyRaisedAfc, arf, plan, config);
     assert.equal(row.pensionWithRaises, expected);
   });
@@ -333,7 +365,9 @@ test('calculateSeries: paystubStream wiring', async (t) => {
     const stream = flatPastStream(start, 60, 5000, 5000);
     const series = calculateSeries(baseInputs({
       paystubStream: stream,
-      lastDayOfSvc: new Date(2026, 5, 30),  // 2026-06-30, before first RAISE 2026-07-01
+      // 2026-06-30, before the first FUTURE raise (2026-07-01). The 2025-07-01
+      // entry in RAISES is past relative to the stream and gets filtered.
+      lastDayOfSvc: new Date(2026, 5, 30),
     }));
     // No raise is ever in horizon, so raisesActive is false on every row.
     // With paystubStream present, pensionWithRaises pins to primaryPension.
