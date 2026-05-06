@@ -1,3 +1,5 @@
+Read PLAN.md, advise where to add a checkbox to enable caching, disabled by default.
+
 Should every raise whose start date is in the past be dropped from the table and projections?
 
 when the graph starts showing a straight line because the employee has retired, the
