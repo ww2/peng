@@ -445,9 +445,8 @@
   </fieldset>
 
   <!-- ── Contractual adjustments (read-only) ──────────────────── -->
-  <!-- Temporarily suppressed: raises interact with AFC differently across plans
-       (noncontributory includes overtime in AFC; others don't). Re-enable once
-       the per-plan raise/AFC interaction is settled. -->
+  <!-- Visibility is toggled at runtime: shown only when a paystub stream
+       drives the calculation (manual-AFC entries can't be projected). -->
   <fieldset id="group-contractual-input" hidden>
     <legend>Contractual adjustments</legend>
     <div class="form-rows">
@@ -455,12 +454,7 @@
       <div class="form-row" id="raises-table-row" style="align-items: flex-start;">
         <span class="form-label">Projected raises</span>
         <table id="raises-table">
-          <tbody>
-            <tr><td>2025-07-01</td><td>3.50%</td></tr>
-            <tr><td>2026-07-01</td><td>3.79%</td></tr>
-            <tr><td>2027-07-01</td><td>4.00%</td></tr>
-            <tr><td>2028-07-01</td><td>4.00%</td></tr>
-          </tbody>
+          <tbody id="raises-table-body"></tbody>
         </table>
       </div>
 
@@ -598,7 +592,19 @@
     const raisesNaEl       = document.getElementById('raises-na');
     const raisesNaTextEl   = document.getElementById('raises-na-text');
     const raisesTableRowEl = document.getElementById('raises-table-row');
+    const raisesTableBodyEl = document.getElementById('raises-table-body');
+    const contractualGroupEl = document.getElementById('group-contractual-input');
     const manualAfcEl      = document.getElementById('manual-afc');
+
+    // Populate the projected-raises table from RAISES (defined in lib/pension.js)
+    // so the displayed table can never drift from the data the projector uses.
+    raisesTableBodyEl.innerHTML = RAISES.map(r => {
+      const m = String(r.date.getMonth() + 1).padStart(2, '0');
+      const d = String(r.date.getDate()).padStart(2, '0');
+      const date = `${r.date.getFullYear()}-${m}-${d}`;
+      const rate = `${(r.rate * 100).toFixed(2)}%`;
+      return `<tr><td>${date}</td><td>${rate}</td></tr>`;
+    }).join('');
     const manualAfcNoteEl  = document.getElementById('manual-afc-note');
     const earningsFieldset = document.getElementById('group-earnings-input');
     const statusLine       = document.getElementById('status-line');
@@ -1407,14 +1413,19 @@
       // blends into AFC, lock the "raises do not apply" checkbox on.
       // Only meaningful when a paystub stream drives the projector — without
       // one, pensionWithRaises is structurally null on every row.
+      // Detect "no raise actually lifted the AFC" via pensionWithRaises >
+      // primaryPension (the gap-removal change in calculateSeries pins
+      // pensionWithRaises to primaryPension when raises don't lift, so the
+      // not-null check that used to suffice would now always be true).
       const noRaisesApply = paystubStream !== null
         && lastDayOfSvc !== null && eligible.length > 0
-        && !series.some(d => d.pensionWithRaises !== null);
+        && !series.some(d => d.pensionWithRaises != null
+                          && d.pensionWithRaises > d.primaryPension);
       applyRaisesNALock(noRaisesApply);
       const raisesNA     = raisesNaEl.checked;
-      // Raise-based curves suppressed pending per-plan AFC/overtime resolution.
-      const showRaises   = false;
-      drawChart(series, { hasSL, isSeparated, raisesNA });
+      const showRaises   = paystubStream !== null && !raisesNA;
+      setContractualVisible(paystubStream !== null);
+      drawChart(series, { hasSL, isSeparated, showRaises });
       drawSeriesTable(series, { hasSL, showRaises });
     }
 
@@ -1454,6 +1465,7 @@
       prevPlanValue              = '';
       prevMemDateValue           = '';
       statusLine.textContent     = '';
+      setContractualVisible(false);
       graphBtn.disabled          = true;
       memDateEl.classList.remove('input-error');
       setMemDateBannerEntry(null);
@@ -1595,6 +1607,13 @@
         delete raisesNaEl.dataset.forced;
         delete raisesNaEl.dataset.prior;
       }
+    }
+
+    // Show the contractual-adjustments fieldset only when a paystub stream
+    // is driving the calculation. Manual-AFC entries can't be projected
+    // forward, so the raises table and override checkbox are meaningless.
+    function setContractualVisible(visible) {
+      contractualGroupEl.hidden = !visible;
     }
 
     function syncLastDayState() {
@@ -1874,9 +1893,7 @@
       if (ok) requestAnimationFrame(runCalculate);
     }
     // ── Chart ────────────────────────────────────────────────────
-    function drawChart(series = null, { hasSL = false, isSeparated = false, raisesNA = false } = {}) {
-      // Raise-based curves suppressed pending per-plan AFC/overtime resolution.
-      const showRaises = false;
+    function drawChart(series = null, { hasSL = false, isSeparated = false, showRaises = false } = {}) {
       const svg = d3.select('#chart-svg');
       const W   = svg.node().clientWidth;
       const H   = svg.node().clientHeight;

@@ -14,22 +14,22 @@ Open `index.html` in a browser via `file://`. URL parameters for development con
 file:///path/to/index.html?plan=hybrid&memDate=2014-08-01&dob=1975-06-15&svcYears=15&svcMonths=3&svcAsOf=2024-01-01&afc=4500&slHours=240&slAsOf=2024-01-01
 ```
 
-Supported params (URL pre-fill block at `index.html:2185+`): `plan`, `dob`, `memDate`, `svcYears`, `svcMonths`, `ncSvcYears`, `ncSvcMonths`, `svcAsOf`, `lastDay`, `afc`, `slHours`, `slAsOf`, `slRate`. `plan` takes one of three values (`hybrid`, `contributory`, `noncontributory`); the tier qualifier is derived from `memDate` (see "Plan key derivation" below). `ncSvcYears`/`ncSvcMonths` are only meaningful for hybrid plans (NC mixed-service split); they are dropped from the URL on non-hybrid plans. Pre-split URLs containing only `lastDay` are accepted as a shim — that date is also used for `svcAsOf`. Bad / unknown params are surfaced in a top-of-page error banner; the corresponding form fields are outlined red until corrected.
+Supported params (URL pre-fill block at `index.html:1745+`): `plan`, `dob`, `memDate`, `svcYears`, `svcMonths`, `ncSvcYears`, `ncSvcMonths`, `svcAsOf`, `lastDay`, `afc`, `slHours`, `slAsOf`, `slRate`. `plan` takes one of three values (`hybrid`, `contributory`, `noncontributory`); the tier qualifier is derived from `memDate` (see "Plan key derivation" below). `ncSvcYears`/`ncSvcMonths` are only meaningful for hybrid plans (NC mixed-service split); they are dropped from the URL on non-hybrid plans. Pre-split URLs containing only `lastDay` are accepted as a shim — that date is also used for `svcAsOf`. Bad / unknown params are surfaced in a top-of-page error banner; the corresponding form fields are outlined red until corrected.
 
 ## Form Structure
 
-Four fieldsets in `index.html:290-451`:
+Four fieldsets in `index.html:354-481`:
 
 1. **Required information** — plan (3-option dropdown: hybrid / contributory / noncontributory), DOB, ERS membership date (`memDate`), credited service (an as-of date anchored at the leftmost slot of `svc-pair-row` regardless of plan, plus one or more years/months pairs to its right). For hybrid plans, three pairs sit in that row: `Hybrid`, `Noncontributory`, and a read-only `Total` computed as `Hybrid + NC` with months carry. For non-hybrid plans, only the `Total` pair is visible and is itself user-editable. Last day of service (or "Still active" checkbox) follows.
 2. **Optional adjustments** — sick leave hours / as-of date / accrual rate (default 14 hrs/mo)
-3. **Contractual adjustments** — read-only `RAISES` table (`index.html:561`) with a "Projected raises do not apply" override checkbox
+3. **Contractual adjustments** — read-only `RAISES` table (`index.html:454`, populated at module-script init from the `RAISES` constant) with a "Projected raises do not apply" override checkbox. The whole fieldset is shown only when a paystub stream is driving the calculation.
 4. **Earnings data** — manual monthly AFC OR paystub directory picker (DP solver writes the computed AFC into the manual field)
 
-`canCalculate()` (`index.html:1788`) gates the Generate-graph button on: plan + dob + memDate (range-valid) + svcAsOf + (Still active OR lastDay) + positive AFC + (no SL hours OR slAsOf set). `validateMemDate()` (`:1771`) hard-blocks future-dated memDate and soft-flags memDate before DOB or before DOB+18.
+`canCalculate()` (`index.html:1284`) gates the Generate-graph button on: plan + dob + memDate (range-valid) + svcAsOf + (Still active OR lastDay) + positive AFC + (no SL hours OR slAsOf set). `validateMemDate()` (`:1267`) hard-blocks future-dated memDate and soft-flags memDate before DOB or before DOB+18.
 
 ## Plan key derivation
 
-The dropdown carries plan **type**; tier (post-2012 vs pre-2012) is inferred from `memDate` against the `2012-07-01` boundary. `derivePlanKey(plan, memDate)` (`index.html:552`) returns the `PLAN_CONFIGS` key:
+The dropdown carries plan **type**; tier (post-2012 vs pre-2012) is inferred from `memDate` against the `2012-07-01` boundary. `derivePlanKey(plan, memDate)` (`lib/pension.js:26`) returns the `PLAN_CONFIGS` key:
 
 - `hybrid` + memDate ≥ 2012-07-01 → `hybrid-post2012`
 - `hybrid` + memDate < 2012-07-01 → `hybrid-pre2012`
@@ -41,18 +41,23 @@ Eligibility, ARF lookup, AFC mode/N, and COLA all read from the derived key. Cro
 
 ## Where Things Live
 
-- **Plan configs** — `PLAN_CONFIGS` at `index.html:537` (multiplier, AFC averaging window `N`, AFC mode, vesting months, COLA rate). Keys are the five internal plan-tier strings; UI translates via `derivePlanKey()`.
-- **ARF tables** — `PRIMARY_ARF_TABLES` at `index.html:571`, copied verbatim from the official ERS calculator's `ers.data.js` (tier1) and `ers.dataNew.js` (tier2)
-- **Eligibility / ARF lookup** — `primaryArfAge` (`:680`, days≥15 rounds up), `primaryEligAge` (`:694`), `primaryEligibility` (`:706`, returns `'regular' | 'early' | 'ineligible'`), `primaryARF` (`:737`)
-- **Pension series** — `calculateSeries` at `index.html:1225` accepts `ncSvcMonths` (defaults 0). Per-month rows from next month → 10 years past first normal retirement (50-yr ceiling). Each row carries `primaryPension`, `pensionCurrentSL`, `pensionProjectedSL`, `pensionWithRaises`, `pensionRaisesCurrentSL`, `pensionRaisesProjectedSL`. Already-separated members and future committed `lastDayOfSvc` snap eligible rows to a single value.
-- **Pension formula helper** — `blendedBenefit(svcMonths, ncMonths, afc, arf, plan, config)` at `index.html:1290`. Splits hybrid service into NC-portion (1.25%) and hybrid-portion (config.multiplier); non-hybrid plans use the uniform formula. Caller invariant: `ncMonths ≤ svcMonths` (the form's read-only Total = Hybrid + NC guarantees this). All six pension expressions in `calculateSeries` (primary, ±raises, ±SL variants) call this helper. SL months credit to the hybrid portion.
-- **Date utilities** — `parseDate` (`:1122`), `addMonths` (`:1127`), `addDays` (`:1136`), `monthsBetween` (`:1151`), `fractionalAge` (`:1158`), `serviceAtMonth` (`:1167`)
-- **Sick leave → months** — `sickLeaveToMonths` at `index.html:1183`. Spec: ≥60 days (480 hrs) required; 60d→3mo, each further 20d→1mo, remainder ≥10d→1mo
-- **Raises** — `applyRaises` at `index.html:1196` blends each scheduled raise linearly across the plan's N-year averaging window, capped at `lastDayOfSvc` if set
-- **Paystub pipeline** — `filterStubs` (`:1368`), `generateWindows` (`:1398`), `scoreStub` (`:1428`), `solveDP` (`:1441`), `computeAndFillAfc` (`:1527`)
-- **Pre-1971 AFC dual-method** — `LUMP_SUM_VACATION` constant (`:943`), `isPre1971DualMethod(planKey)` (`:1519`) gates the trigger, `computeDualMethodAfc(config)` (`:1545`) runs Method A (top-3 excl. lump-sum vacation) and Method B (top-5 incl. lump-sum vacation) and writes the higher monthly AFC. Renders winner/runner-up + no-vacation warning in the windows section.
-- **Chart** — `drawChart` at `index.html:2307`. Curves drawn back-to-front via `makeCurve`.
-- **Debug handle** — `window._debug` (`:748`) exposes the ARF helpers; `window._debug.lastSeries` is set after each Calculate (`:1886`)
+Pure logic lives in `lib/pension.js` (loaded as a classic `<script>` so its top-level declarations are also accessible from the browser console; also `require()`-able from Node, used by `tests/pension.test.js`). DOM-bound code stays in `index.html`. Line numbers below are split accordingly.
+
+- **Plan configs** — `PLAN_CONFIGS` at `lib/pension.js:9` (multiplier, AFC averaging window `N`, AFC mode, vesting months, COLA rate). Keys are the five internal plan-tier strings; UI translates via `derivePlanKey` (`:26`).
+- **ARF tables** — `PRIMARY_ARF_TABLES` at `lib/pension.js:61`, copied verbatim from the official ERS calculator's `ers.data.js` (tier1) and `ers.dataNew.js` (tier2)
+- **Eligibility / ARF lookup** — `primaryArfAge` (`lib/pension.js:170`, days≥15 rounds up), `primaryEligAge` (`:184`), `primaryEligibility` (`:196`, returns `'regular' | 'early' | 'ineligible'`), `primaryARF` (`:227`)
+- **Pension series** — `calculateSeries` at `lib/pension.js:432` accepts `ncSvcMonths` (defaults 0) and an optional `paystubStream` (defaults `null`). Per-month rows from next month → 10 years past first normal retirement (50-yr ceiling). Each row carries `primaryPension`, `pensionCurrentSL`, `pensionProjectedSL`, `pensionWithRaises`, `pensionRaisesCurrentSL`, `pensionRaisesProjectedSL`. Already-separated members and future committed `lastDayOfSvc` snap eligible rows to a single value.
+- **Pension formula helper** — `blendedBenefit(svcMonths, ncMonths, afc, arf, plan, config)` at `lib/pension.js:418`. Splits hybrid service into NC-portion (1.25%) and hybrid-portion (config.multiplier); non-hybrid plans use the uniform formula. Caller invariant: `ncMonths ≤ svcMonths` (the form's read-only Total = Hybrid + NC guarantees this). All six pension expressions in `calculateSeries` (primary, ±raises, ±SL variants) call this helper. SL months credit to the hybrid portion.
+- **Date utilities** — `parseDate` (`lib/pension.js:253`), `addMonths` (`:258`), `addDays` (`:267`), `monthsBetween` (`:282`), `fractionalAge` (`:289`), `serviceAtMonth` (`:298`)
+- **Sick leave → months** — `sickLeaveToMonths` at `lib/pension.js:314`. Spec: ≥60 days (480 hrs) required; 60d→3mo, each further 20d→1mo, remainder ≥10d→1mo
+- **Raises projection (paystub-driven)** — `projectAfcAtRetirement` at `lib/pension.js:351` is the live path called by `calculateSeries` when a paystub stream is present. Picks top-N **non-overlapping** rolling 12-month windows from past+future via DP (the official ERS rule, matching `solveDP`). Past/future boundary derived from `stream[last].month + 1`; future months projected at `base × Π raises ≤ that month` with `total = regular` (future NR ≡ 0). See `info/DESIGN.md` "Projected Raises" for the full algorithm. The legacy `applyRaises` (`lib/pension.js:328`) is the linear-blend approximation kept as a closed-form reference (saturated cases match the projector to within 1¢) and as a test fixture; not wired into `calculateSeries` anymore.
+- **Raises gate** — inside `calculateSeries`, `raisesActive = raisedAfc != null && raisedAfc > afcMonthly && anyRaiseInHorizon`. When `paystubStream` is present but `raisesActive` is false, `pensionWithRaises` and the SL-raise variants pin to their non-raise counterparts (rather than null) so the chart curves overlay the primary curve from the X origin instead of producing a left-edge gap. Manual-AFC scenarios get null on every row.
+- **`RAISES` table** — `RAISES` constant at `lib/pension.js:35`. Single source of truth for the projected-raises schedule. The on-screen `#raises-table-body` is populated from this constant at module-script init in `index.html:601` — editing the constant updates the displayed table on next page load.
+- **Paystub pipeline** — `filterStubs` (`lib/pension.js:599`), `generateWindows` (`:629`), `scoreStub` (`:659`), `buildPaystubStream` (`:685`, truncates trailing months not anchored by a stub whose `endDate` is the last day of its month — returns `[]` if no anchor exists), `solveDP` (`:725`), `detectGaps` (`:764`). The non-pure end of the pipeline (`computeAndFillAfc`) lives at `index.html:1018`.
+- **Pre-1971 AFC dual-method** — `LUMP_SUM_VACATION` constant (`lib/pension.js:48`), `isPre1971DualMethod(planKey, memDate)` (`:241`) gates the trigger, `computeDualMethodAfc(config)` at `index.html:1547` runs Method A (top-3 excl. lump-sum vacation) and Method B (top-5 incl. lump-sum vacation) and writes the higher monthly AFC. Renders winner/runner-up + no-vacation warning in the windows section.
+- **Contractual-adjustments fieldset** — `#group-contractual-input` (`index.html:451`) is hidden by default (HTML `hidden` attribute) and toggled at runtime by `setContractualVisible` (`index.html:1615`); shown only when `paystubStream !== null`. `runCalculate` derives `showRaises = paystubStream !== null && !raisesNA` and threads it to `drawChart` and `drawSeriesTable`. The "Projected raises do not apply" auto-lock (`applyRaisesNALock`, `:1594`) fires when `lastDayOfSvc` cuts off all raises in the projection horizon.
+- **Chart** — `drawChart` at `index.html:1896`. Curves drawn back-to-front via `makeCurve`.
+- **Debug handle** — `window._debug` exposes the ARF helpers and `lastPaystubStream`; `window._debug.lastSeries` is set after each Calculate.
 
 The pension formula lives in `blendedBenefit`:
 ```js
@@ -79,14 +84,14 @@ For dual-threshold plans, whichever normal threshold is met first ends the penal
 
 ## Chart
 
-`drawChart` at `index.html:2307`. Notable:
+`drawChart` at `index.html:1896`. Notable:
 
-- **Zone compression** (`COMPRESS_PX` at `:2323`, `compressedSegs` at `:2344`) — the not-yet-vested and vested-but-ineligible date ranges are squashed to fixed pixel widths and separated from the eligible zone by zigzag break marks; axis labels switch from years to a single boundary marker per compressed segment
-- **Curves** (`makeCurve` at `:2543`, drawn back-to-front so primary sits on top): primary blue (`primaryPension`), lighter-blue solid + dashed sick-leave variants, purple raises and raises+SL variants. Dashed for "projected" sick leave. All use `line.defined` so gaps appear where the value is null (ineligible months)
+- **Zone compression** (`COMPRESS_PX` at `:1911`, `compressedSegs` at `:1932`) — the not-yet-vested and vested-but-ineligible date ranges are squashed to fixed pixel widths and separated from the eligible zone by zigzag break marks; axis labels switch from years to a single boundary marker per compressed segment
+- **Curves** (`makeCurve` at `:2131`, drawn back-to-front so primary sits on top): primary blue (`primaryPension`), lighter-blue solid + dashed sick-leave variants, purple raises and raises+SL variants. Dashed for "projected" sick leave. All use `line.defined` so gaps appear where the value is null (ineligible months). Raise curves overlay the primary at retDates where raises haven't lifted the AFC (the `pensionWithRaises = primaryPension` pin in `calculateSeries`); they only diverge upward where raises actually lift.
 - **Region shading**: not-yet-vested (`#e8e8e8`), vested-but-ineligible (`#f5f5f5`), early-retirement-penalty zone between first eligible and first normal retirement (`#f0f0f0`)
 - **Legend** — flowed left-to-right below the X-axis label, wraps and column-aligns; only shows entries for active curves
-- **Hover tooltip + COLA** (`:2701+`): dot on each visible curve at the hovered month; label snaps to the curve nearest the cursor; a dashed-green COLA projection extends 20 years from the hovered point using the plan's `colaRate`. Suffix: `(+ cur. SL)`, `(+ proj. SL)`, `(+ raises)`, etc.
-- **Estimation table** (`drawSeriesTable` at `:1816`) — first 48 rows; collapses tail rows once values stabilize
+- **Hover tooltip + COLA** (`:2342+`): dot on each visible curve at the hovered month; label snaps to the curve nearest the cursor; a dashed-green COLA projection extends 20 years from the hovered point using the plan's `colaRate`. Suffix: `(+ cur. SL)`, `(+ proj. SL)`, `(+ raises)`, etc.
+- **Estimation table** (`drawSeriesTable` at `:1333`) — first 48 rows; collapses tail rows once values stabilize
 
 ## Reference Documents
 

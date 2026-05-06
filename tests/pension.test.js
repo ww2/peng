@@ -299,7 +299,7 @@ test('calculateSeries: paystubStream wiring', async (t) => {
     assert.equal(row.pensionWithRaises, expected);
   });
 
-  await t.test('3. NR-present noncontributory → projector stays at past total; gate suppresses curve', () => {
+  await t.test('3. NR-present noncontributory → projector stays at past total; raises pin to primaryPension', () => {
     const start = nextMonthStart();
     const stream = flatPastStream(start, 60, 5000, 6000);
     const series = calculateSeries(baseInputs({
@@ -309,9 +309,15 @@ test('calculateSeries: paystubStream wiring', async (t) => {
     }));
     // Compounded RAISES (1.0379 × 1.04 × 1.04 ≈ 1.1226) never exceed the NR
     // markup (6000/5000 = 1.20), so projector AFC stays at 6000 = afcMonthly,
-    // raisesActive is false, and pensionWithRaises is null on every row.
+    // raisesActive is false. With paystubStream present, pensionWithRaises
+    // pins to primaryPension on every eligible row (so the chart curve has
+    // no left-edge gap); ineligible rows stay null.
     for (const row of series) {
-      assert.equal(row.pensionWithRaises, null);
+      if (row.primaryPension == null) {
+        assert.equal(row.pensionWithRaises, null);
+      } else {
+        assert.equal(row.pensionWithRaises, row.primaryPension);
+      }
     }
     // Sanity check: legacy applyRaises would have grown afcMonthly above 6000
     // at a saturated retDate — confirming the divergence the projector fixes.
@@ -322,15 +328,21 @@ test('calculateSeries: paystubStream wiring', async (t) => {
     }
   });
 
-  await t.test('4. lastDayOfSvc before first RAISE → raisesActive gate keeps pensionWithRaises null', () => {
+  await t.test('4. lastDayOfSvc before first RAISE → raise curves pin to primaryPension everywhere', () => {
     const start = nextMonthStart();
     const stream = flatPastStream(start, 60, 5000, 5000);
     const series = calculateSeries(baseInputs({
       paystubStream: stream,
       lastDayOfSvc: new Date(2026, 5, 30),  // 2026-06-30, before first RAISE 2026-07-01
     }));
+    // No raise is ever in horizon, so raisesActive is false on every row.
+    // With paystubStream present, pensionWithRaises pins to primaryPension.
     for (const row of series) {
-      assert.equal(row.pensionWithRaises, null);
+      if (row.primaryPension == null) {
+        assert.equal(row.pensionWithRaises, null);
+      } else {
+        assert.equal(row.pensionWithRaises, row.primaryPension);
+      }
     }
   });
 });

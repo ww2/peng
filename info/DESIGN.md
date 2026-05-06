@@ -158,32 +158,110 @@ only on the blue (peng-primary) curve.
 
 ---
 
-## Projected Raises — Currently Suppressed
+## Projected Raises — Paystub-Driven Month-Level Projection
 
-The contractual-raises feature (the projected-raises table, the "Projected
-raises do not apply" override, and the four purple raise-based chart curves
-plus their estimation-table columns) is hidden in the UI pending resolution
-of a per-plan AFC composition issue.
+The contractual-raises feature renders four purple curves on the chart
+(`pensionWithRaises`, ±sick-leave variants) and their estimation-table
+columns. It is gated on the user having loaded paystub data; manual-AFC
+entries don't have the per-month structure required to project a raised
+AFC, so the contractual fieldset stays hidden in that mode.
 
-**The problem:** most plans compute AFC from regular pay only — overtime and
-differentials are excluded. Noncontributory, however, includes overtime (and
-"overtime and bonuses" per the spec) in AFC. The raise table represents
-across-the-board contractual percentage bumps to base pay, so blending those
-raises into AFC the same way for all plans understates the noncontributory
-AFC growth (raises lift base pay but the AFC is denominated against a larger
-overtime-inclusive figure). Until the right per-plan blending rule is worked
-out, showing one raise-adjusted curve risks being silently wrong for
-noncontributory members.
+### The problem the windowing projector solves
 
-**What's suppressed:**
-- `#group-contractual-input` fieldset hidden
-- `showRaises` hard-coded to `false` at both the calculate-flow site
-  (`index.html:1941`) and inside `drawChart` (`index.html:2349`)
+The naïve approach — multiplying the manual `afcMonthly` by the raises
+blended over the N-year window (`applyRaises` in `lib/pension.js`) — is
+silently wrong for noncontributory plans. Most plans compute AFC from
+regular pay only; noncontributory includes overtime, differentials, and
+"overtime and bonuses" per spec. The raise table represents across-the-
+board percentage bumps to **base pay**, so naïvely lifting an NR-inclusive
+AFC by those raises overstates the growth (the raise applies only to the
+regular component, not the overtime/differentials baked into the past
+AFC). Conversely, if the user retires far enough in the future that the
+NR-inclusive past has aged out, the raise-only future could equal or
+exceed the past — but this only happens when compounded raises overcome
+the NR markup, which `applyRaises` cannot model.
 
-**What's preserved:** `calculateSeries` still computes
-`pensionWithRaises` / `pensionRaisesCurrentSL` / `pensionRaisesProjectedSL`
-and `applyRaises` / the `RAISES` table are still in source. Re-enabling is a
-revert of the three edits above once the per-plan rule is settled.
+### The flow
+
+`runCalculate` → `buildPaystubStream` → `calculateSeries` →
+`projectAfcAtRetirement`.
+
+1. **`buildPaystubStream`** (`lib/pension.js`) groups stubs into
+   per-calendar-month entries `{ month, regular, total }`. Two structural
+   guarantees protect downstream consumers:
+   - **Calendar-contiguous**: missing months between the first and last
+     stub are zero-filled, so consumers can index by array position and
+     trust 12-position windows are 12 consecutive calendar months.
+   - **Trailing incomplete months are truncated**: the stream ends at
+     the latest month containing a stub whose `endDate` is the last day
+     of its calendar month (mirroring `generateWindows`'s `lastAnchorEnd`
+     rule). Without this, a half-month most-recent stub gives a depressed
+     "current rate" base and corrupts the projector's future projection.
+     Returns `[]` if no month-end stub exists at all.
+
+2. **`projectAfcAtRetirement`** (`lib/pension.js`) computes the projected
+   monthly AFC at a candidate retDate by:
+   - Concatenating the historical stream (past) with a future projection
+     (`base × Π raises ≤ that month`, `total = regular`, future NR ≡ 0).
+   - The past/future boundary is `stream[last].month + 1`, derived from
+     the (truncated) stream — the function takes no separate `currentMonth`
+     parameter. Because `buildPaystubStream` truncates to a complete-month
+     boundary, the past + future array is calendar-contiguous by
+     construction, so the array-index DP enforces 12 consecutive calendar
+     months naturally.
+   - Picking the top-N **non-overlapping** 12-month windows by sum (the
+     official ERS rule per `info/Retirement-Information-*-eff.-6.2022.md`,
+     matching `solveDP`'s semantics for paystub-driven AFC). DP recurrence
+     `dp[k][i] = max(dp[k][i-1], dp[k-1][i-12] + S_i)`.
+   - Returns `(top-N sum) / (N × 12)` or `null` if fewer than N windows
+     exist.
+
+3. **`calculateSeries`** (`lib/pension.js`) calls
+   `projectAfcAtRetirement` per row when a paystub stream is present
+   (else `raisedAfc = null`). Two gates determine the resulting curve:
+   - `raisesActive = raisedAfc != null && raisedAfc > afcMonthly &&
+      anyRaiseInHorizon` — both halves matter. The `> afcMonthly` half
+     handles the noncontributory paradox (past dominates → projector
+     equals afcMonthly → no lift). The `anyRaiseInHorizon` half handles
+     pre-raise retDates and `lastDayOfSvc` cuts: even when a fresh `base`
+     is higher than the past 5-year average and pulls the top-N up,
+     that's not actually a raise effect and shouldn't render as one.
+   - `pensionWithRaises = (paystubStream-present-and-eligible) ?
+      (raisesActive ? blendedBenefit(…raisedAfc…) : primaryPension) :
+      null`. The pin to `primaryPension` when the gate is false (rather
+     than `null`) is what keeps the raise curve continuous from the
+     chart's left edge — the curve overlays primary at retDates where
+     raises haven't lifted, and diverges upward only where they have.
+     Without this pin, raise curves had a visible left-edge gap.
+
+### The closed-form correspondence with `applyRaises`
+
+For a flat regular≡total stream and a `retDate` at least N×12 months past
+the last raise (full saturation), the projector returns `base × Π(1 + r_i)`
+exactly — same as `applyRaises(base, retDate, N, null)`. Tests at
+`tests/pension.test.js` verify this. For partial blends or NR-present
+streams, the two diverge intentionally; this is the bug the projector
+fixes. `applyRaises` and the `RAISES` table are still exported from
+`lib/pension.js` because the closed-form case is a useful reference
+point and the constant feeds both the projector and the on-screen
+contractual-adjustments table.
+
+### UI wiring
+
+- **Contractual fieldset visibility** (`index.html:setContractualVisible`):
+  shown only when `paystubStream !== null`. Hidden on `runClear`.
+- **Raises table** (`index.html:#raises-table-body`): populated at
+  module-script init from `RAISES`. Single source of truth — editing the
+  constant updates the displayed table on next page load.
+- **`showRaises` flag** (`index.html:runCalculate`): derived as
+  `paystubStream !== null && !raisesNA` and threaded to both `drawChart`
+  and `drawSeriesTable`. Replaces the previous hardcoded `false`.
+- **`noRaisesApply` auto-lock** (`index.html:runCalculate`): forces the
+  "Projected raises do not apply" checkbox checked + disabled when
+  `lastDayOfSvc` cuts off all raises in the projection horizon. Detected
+  via `!series.some(d => d.pensionWithRaises != null && d.pensionWithRaises
+  > d.primaryPension)` — checking strict inequality, since the gap-removal
+  pin makes `pensionWithRaises != null` always true on eligible rows.
 
 ---
 
