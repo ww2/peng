@@ -511,6 +511,14 @@
           </div>
         </div>
         <span id="picker-path"></span>
+        <div class="form-row" style="margin-top:0.75rem; margin-bottom:0.25rem;">
+          <label style="font-size:0.8rem; display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
+            <input type="checkbox" id="cache-toggle" style="margin:0;"> Cache paystubs across reloads
+          </label>
+        </div>
+        <div class="form-row" id="cache-clear-hint" style="font-size: 0.7rem; color: #888;" hidden>
+          Use the "Clear all fields" button to clear cached paystub data
+        </div>
         <div id="afc-computed"></div>
         <div id="afc-date-range"></div>
         <div id="regular-earnings"></div>
@@ -616,6 +624,8 @@
     const pickerBtn        = document.getElementById('picker-btn');
     const cancelBtn        = document.getElementById('cancel-btn');
     const pickerPath       = document.getElementById('picker-path');
+    const cacheToggleEl    = document.getElementById('cache-toggle');
+    const cacheClearHintEl = document.getElementById('cache-clear-hint');
     const afcComputedEl     = document.getElementById('afc-computed');
     const afcDateRange      = document.getElementById('afc-date-range');
     const regularEarningsEl = document.getElementById('regular-earnings');
@@ -637,13 +647,79 @@
     // Expose for console testing (module scope is not accessible otherwise).
     window._debug = { primaryArfAge, primaryEligAge, primaryEligibility, primaryARF, PRIMARY_ARF_TABLES, lastPaystubStream: [] };
 
+    // ── Paystub cache ────────────────────────────────────────────
+    const PAYSTUB_CACHE_KEY = 'paystubCache';
+    let cacheMode = new URLSearchParams(window.location.search).has('cache');
+
+    function refreshCacheHint() {
+      cacheClearHintEl.hidden = localStorage.getItem(PAYSTUB_CACHE_KEY) === null;
+    }
+
+    function persistCache(stubs) {
+      if (!cacheMode) return;
+      const blob = JSON.stringify({ cachedAt: new Date().toISOString(), stubs });
+      localStorage.setItem(PAYSTUB_CACHE_KEY, blob);
+      refreshCacheHint();
+    }
+
+    function clearCache() {
+      localStorage.removeItem(PAYSTUB_CACHE_KEY);
+      refreshCacheHint();
+    }
+
+    function loadCache() {
+      const raw = localStorage.getItem(PAYSTUB_CACHE_KEY);
+      if (!raw) return null;
+      let parsed;
+      try { parsed = JSON.parse(raw); }
+      catch (e) { console.warn('paystubCache: invalid JSON', e); return null; }
+      if (!parsed || typeof parsed !== 'object'
+          || typeof parsed.cachedAt !== 'string'
+          || !Array.isArray(parsed.stubs)) {
+        console.warn('paystubCache: invalid shape', parsed);
+        return null;
+      }
+      // Re-derive Date objects from the canonical M/D/Y strings to match the
+      // original parseDate() output; serialized Date strings would shift across
+      // timezones.
+      const stubs = parsed.stubs.map(s => ({
+        ...s,
+        beginDate: parseDate(s.payBeginDate),
+        endDate:   parseDate(s.payEndDate),
+      }));
+      return { stubs, cachedAt: new Date(parsed.cachedAt) };
+    }
+
+    cacheToggleEl.checked = cacheMode;
+    refreshCacheHint();
+
+    cacheToggleEl.addEventListener('change', () => {
+      cacheMode = cacheToggleEl.checked;
+      const params = new URLSearchParams(window.location.search);
+      if (cacheMode) params.set('cache', '');
+      else params.delete('cache');
+      // URLSearchParams.toString() emits `cache=` for empty values; we want `cache`.
+      const search = params.toString().replace(/=(?=&|$)/g, '');
+      const newUrl = `${window.location.pathname}${search ? '?' + search : ''}${window.location.hash}`;
+      history.replaceState(null, '', newUrl);
+
+      // If paystubs are already loaded when the user opts in, persist them now
+      // so they don't have to reload + re-pick to populate the cache.
+      if (cacheMode && lastStubs.length) persistCache(lastStubs);
+
+      updateReloadLink();
+    });
+
     // ── Directory picker ─────────────────────────────────────────
     let pdfFiles        = {};
     let lastStubs       = [];
     let lastWindows     = [];
     let cancelRequested = false;
 
-    pickerBtn.addEventListener('click', () => pickerEl.click());
+    // Reset value before opening: <input type="file"> won't fire `change` if
+    // the user re-selects the same files, which would silently swallow the
+    // re-pick after a cancelled scan.
+    pickerBtn.addEventListener('click', () => { pickerEl.value = ''; pickerEl.click(); });
     cancelBtn.addEventListener('click', () => { cancelRequested = true; });
 
     // Some browsers restore file input selections across reloads; clear on load.
@@ -651,6 +727,56 @@
     pickerPath.textContent        = '';
     afcDateRange.textContent      = '';
     regularEarningsEl.textContent = '';
+
+    // Shared between the directory-picker success path and the cache-restore
+    // path (Stage 1.3). `fromCache` skips the persistCache write so we don't
+    // re-stamp `cachedAt` on every reload.
+    function applyLoadedStubs(stubs, { fromCache = false, cachedAt = null } = {}) {
+      const windows = generateWindows(stubs);
+
+      lastStubs   = stubs;
+      lastWindows = windows;
+      window._debug.lastPaystubStream = buildPaystubStream(stubs);
+
+      const first = stubs[0];
+      const last  = stubs[stubs.length - 1];
+      const stubLabel = `${stubs.length} stub${stubs.length !== 1 ? 's' : ''}`;
+      if (fromCache && cachedAt) {
+        const pad = n => String(n).padStart(2, '0');
+        const ts = `${cachedAt.getFullYear()}-${pad(cachedAt.getMonth() + 1)}-${pad(cachedAt.getDate())} ${pad(cachedAt.getHours())}:${pad(cachedAt.getMinutes())}`;
+        afcComputedEl.textContent = `${stubLabel} loaded from summaries cached at ${ts}`;
+      } else {
+        afcComputedEl.textContent = `${stubLabel} extracted`;
+      }
+      afcDateRange.textContent = (first && last)
+        ? `Paystubs from ${toYmd(first.payBeginDate)} to ${toYmd(last.payEndDate)}`
+        : '';
+
+      updateRegularEarningsDisplay();
+
+      const gaps = detectGaps(stubs);
+      gapWarningsEl.innerHTML = '';
+      if (gaps.length) {
+        const header = document.createElement('div');
+        header.textContent = `${gaps.length} gap${gaps.length !== 1 ? 's' : ''} in paystub coverage:`;
+        gapWarningsEl.appendChild(header);
+        const ul = document.createElement('ul');
+        for (const g of gaps) {
+          const li = document.createElement('li');
+          li.textContent = `${toYmd(fmtDate(g.from))} – ${toYmd(fmtDate(g.to))}`;
+          ul.appendChild(li);
+        }
+        gapWarningsEl.appendChild(ul);
+      }
+
+      const dpResult = computeAndFillAfc();
+      updateReloadLink();
+      maybeCalculate();
+
+      if (!fromCache) persistCache(stubs);
+
+      return dpResult;
+    }
 
     pickerEl.addEventListener('change', async function () {
       const pdfs = Array.from(this.files)
@@ -665,6 +791,10 @@
 
       // Clear any previously computed AFC immediately.
       manualAfcEl.value = '';
+      // A new directory invalidates any previous cache. persistCache rewrites
+      // it on success; on cancel/error the cache stays cleared so the next
+      // ?cache reload behaves like a fresh session.
+      clearCache();
       updateReloadLink();
       maybeCalculate();
 
@@ -769,42 +899,10 @@
       // 3. Filter summary
       debugBody.appendChild(showFilterSummary(results.length, stubs, dropped, errors, windows));
 
-      // Status lines
-      const first = stubs[0];
-      const last  = stubs[stubs.length - 1];
-      afcComputedEl.textContent =
-        `${stubs.length} stub${stubs.length !== 1 ? 's' : ''} extracted`;
-      afcDateRange.textContent = (first && last)
-        ? `Paystubs from ${toYmd(first.payBeginDate)} to ${toYmd(last.payEndDate)}`
-        : '';
-
-      lastStubs   = stubs;
-      lastWindows = windows;
-      window._debug.lastPaystubStream = buildPaystubStream(stubs);
-
-      updateRegularEarningsDisplay();
-
-      const gaps = detectGaps(stubs);
-      gapWarningsEl.innerHTML = '';
-      if (gaps.length) {
-        const header = document.createElement('div');
-        header.textContent = `${gaps.length} gap${gaps.length !== 1 ? 's' : ''} in paystub coverage:`;
-        gapWarningsEl.appendChild(header);
-        const ul = document.createElement('ul');
-        for (const g of gaps) {
-          const li = document.createElement('li');
-          li.textContent = `${toYmd(fmtDate(g.from))} – ${toYmd(fmtDate(g.to))}`;
-          ul.appendChild(li);
-        }
-        gapWarningsEl.appendChild(ul);
-      }
-
       debugDetails.classList.remove('disabled');
       debugPanelEl.hidden = false;
-      const dpResult = computeAndFillAfc();
+      const dpResult = applyLoadedStubs(stubs);
       if (dpResult) debugBody.appendChild(renderWindowsSection(dpResult.selected, dpResult.config, dpResult.dualMethod));
-      updateReloadLink();
-      maybeCalculate();
     });
 
     // ── PDF parsing constants ─────────────────────────────────────
@@ -1445,6 +1543,7 @@
       lastWindows     = [];
       cancelRequested = false;
       window._debug.lastPaystubStream = [];
+      clearCache();
 
       // Picker UI
       pickerEl.value           = '';
@@ -1709,7 +1808,9 @@
       add('slHours',    slHoursEl);
       add('slAsOf',     slAsOfEl);
       if (slRateEl.value && slRateEl.value !== '14') add('slRate', slRateEl);
-      const qs = params.toString();
+      if (cacheMode) params.set('cache', '');
+      // Strip `=` from presence-only flags so the URL reads `?cache` not `?cache=`.
+      const qs = params.toString().replace(/=(?=&|$)/g, '');
       return window.location.pathname + (qs ? '?' + qs : '');
     }
 
@@ -1742,13 +1843,13 @@
     manualAfcEl.addEventListener('input',   commitAfc);
 
     // ── URL parameter pre-fill ────────────────────────────────────
-    // Supported params: plan, dob, memDate, svcYears, svcMonths, ncSvcYears, ncSvcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate
+    // Supported params: plan, dob, memDate, svcYears, svcMonths, ncSvcYears, ncSvcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate, cache
     // svcAsOf is the reference date for the entered credited service. lastDay (if set) implies
     // the user is separated or has a planned retirement date; "Still active" is unchecked.
     // Example: ?plan=hybrid&dob=1975-06-15&memDate=2014-08-01&svcYears=15&svcMonths=3&afc=4500
     // Bad values are surfaced in the URL-error banner; good values still pre-fill.
     {
-      const SUPPORTED_PARAMS = ['plan','dob','memDate','svcYears','svcMonths','ncSvcYears','ncSvcMonths','svcAsOf','lastDay','afc','slHours','slAsOf','slRate'];
+      const SUPPORTED_PARAMS = ['plan','dob','memDate','svcYears','svcMonths','ncSvcYears','ncSvcMonths','svcAsOf','lastDay','afc','slHours','slAsOf','slRate','cache'];
       const PLAN_VALUES = ['hybrid','contributory','noncontributory'];
       const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
       const banner = urlErrorBanner;
@@ -1884,6 +1985,20 @@
       syncSvcSplitVisibility();
       updateManualAfcNote();
       updateReloadLink();
+
+      // Restore cached paystubs (if `?cache` and localStorage has a hit).
+      // Runs after form pre-fill so computeAndFillAfc sees the right plan
+      // key, and before the auto-fire below so the AFC field is populated
+      // first. Failure falls through to normal no-cache behavior.
+      if (cacheMode) {
+        try {
+          const hit = loadCache();
+          if (hit) applyLoadedStubs(hit.stubs, { fromCache: true, cachedAt: hit.cachedAt });
+        } catch (e) {
+          console.warn('paystubCache: restore failed', e);
+        }
+      }
+
       // Registered AFTER Stage-4 addError clear listeners so the range-
       // validation class state wins on the first input event after a
       // bad-URL highlight gets cleared.

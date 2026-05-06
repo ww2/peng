@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(git log *)",
-      "Bash(node --test tests/pension.test.js)"
+      "Bash(node --test tests/pension.test.js)",
+      "Bash(node --test tests/)"
     ]
   }
 }
