@@ -1382,6 +1382,7 @@
       if (!isNaN(slHours) && slHours <= 0)
         console.warn(`Sick leave hours (${slHours}) must be positive; ignoring.`);
       const isHybridPlan = planEl.value === 'hybrid';
+      const paystubStream = lastStubs.length ? buildPaystubStream(lastStubs) : null;
       const series  = calculateSeries({
         plan             : derivePlanKey(planEl.value, memDateEl.value),
         dob              : parseIsoDate(dobEl.value),
@@ -1393,6 +1394,7 @@
         slHours          : isNaN(slHours) || slHours <= 0 ? null : slHours,
         slRate           : parseFloat(slRateEl.value) || 14,
         slAsOf,
+        paystubStream,
       });
       window._debug.lastSeries = series;
       const eligible = series.filter(d => d.primaryPension !== null);
@@ -1403,7 +1405,10 @@
       const isSeparated  = lastDayOfSvc !== null && lastDayOfSvc < today;
       // If lastDay caps the raises horizon so that no scheduled raise ever
       // blends into AFC, lock the "raises do not apply" checkbox on.
-      const noRaisesApply = lastDayOfSvc !== null && eligible.length > 0
+      // Only meaningful when a paystub stream drives the projector — without
+      // one, pensionWithRaises is structurally null on every row.
+      const noRaisesApply = paystubStream !== null
+        && lastDayOfSvc !== null && eligible.length > 0
         && !series.some(d => d.pensionWithRaises !== null);
       applyRaisesNALock(noRaisesApply);
       const raisesNA     = raisesNaEl.checked;

@@ -5,6 +5,14 @@ const {
   buildPaystubStream,
   projectAfcAtRetirement,
   applyRaises,
+  blendedBenefit,
+  calculateSeries,
+  serviceAtMonth,
+  primaryEligAge,
+  primaryArfAge,
+  primaryEligibility,
+  primaryARF,
+  PLAN_CONFIGS,
   RAISES,
 } = require('../lib/pension.js');
 
@@ -13,6 +21,8 @@ const stub = (y, m, d1, d2, earnings) => ({
   endDate:   new Date(y, m, d2),
   currentEarnings: earnings,
 });
+
+const lastDayOfMonth = (y, m) => new Date(y, m + 1, 0).getDate();
 
 const summarize = (stream) =>
   stream.map(e => ({
@@ -31,7 +41,7 @@ test('buildPaystubStream', async (t) => {
     const stubs = [];
     for (let m = 0; m < 6; m++) {
       stubs.push(stub(2024, m,  1, 15, { Regular: 2000 }));
-      stubs.push(stub(2024, m, 16, 28, { Regular: 2000 }));
+      stubs.push(stub(2024, m, 16, lastDayOfMonth(2024, m), { Regular: 2000 }));
     }
     const stream = buildPaystubStream(stubs);
     assert.equal(stream.length, 6);
@@ -71,7 +81,7 @@ test('buildPaystubStream', async (t) => {
   await t.test('cross-year span (Nov 2023 → Feb 2024) → 4 entries, gaps zero-filled', () => {
     const stubs = [
       stub(2023, 10, 1, 30, { Regular: 2000 }),
-      stub(2024,  1, 1, 28, { Regular: 2500 }),
+      stub(2024,  1, 1, 29, { Regular: 2500 }),  // Feb 2024 leap, day 29 = month-end
     ];
     assert.deepEqual(summarize(buildPaystubStream(stubs)), [
       { y: 2023, m: 10, regular: 2000, total: 2000 },
@@ -79,6 +89,31 @@ test('buildPaystubStream', async (t) => {
       { y: 2024, m:  0, regular: 0,    total: 0    },
       { y: 2024, m:  1, regular: 2500, total: 2500 },
     ]);
+  });
+
+  await t.test('trailing mid-month stub triggers truncation; stream ends at last fully-covered month', () => {
+    // Five complete months (Jan–May), then a trailing half-month stub for June.
+    const stubs = [];
+    for (let m = 0; m < 5; m++) {
+      stubs.push(stub(2024, m,  1, 15, { Regular: 2000 }));
+      stubs.push(stub(2024, m, 16, lastDayOfMonth(2024, m), { Regular: 2000 }));
+    }
+    stubs.push(stub(2024, 5, 1, 15, { Regular: 2000 }));  // June 1–15 only
+    const stream = buildPaystubStream(stubs);
+    assert.equal(stream.length, 5);
+    assert.equal(stream[stream.length - 1].month.getMonth(), 4);  // May
+    for (const e of stream) {
+      assert.equal(e.regular, 4000);
+      assert.equal(e.total,   4000);
+    }
+  });
+
+  await t.test('no month-end stub anywhere → returns []', () => {
+    const stubs = [
+      stub(2024, 0, 1, 15, { Regular: 2000 }),
+      stub(2024, 1, 1, 15, { Regular: 2000 }),
+    ];
+    assert.deepEqual(buildPaystubStream(stubs), []);
   });
 });
 
@@ -95,7 +130,6 @@ test('projectAfcAtRetirement', async (t) => {
   await t.test('1. flat stream, no raises → returns flat value exactly', () => {
     const afc = projectAfcAtRetirement({
       stream: flatStream(2021, 0, 60, 5000, 5000),  // Jan 2021 – Dec 2025
-      currentMonth: new Date(2026, 0, 1),
       retDate:      new Date(2026, 0, 1),
       raises: [],
       N: 3,
@@ -108,7 +142,6 @@ test('projectAfcAtRetirement', async (t) => {
   await t.test('2. flat stream + saturated single raise → base × (1+r) exactly', () => {
     const afc = projectAfcAtRetirement({
       stream: flatStream(2016, 0, 120, 5000, 5000),  // Jan 2016 – Dec 2025
-      currentMonth: new Date(2026, 0, 1),
       retDate:      new Date(2029, 11, 1),           // 48 future months at 5250
       raises: [{ date: new Date(2018, 0, 1), rate: 0.05 }],
       N: 3,
@@ -121,7 +154,6 @@ test('projectAfcAtRetirement', async (t) => {
   await t.test('3. NR-dominated past, near-term retDate → past total wins', () => {
     const afc = projectAfcAtRetirement({
       stream: flatStream(2021, 0, 60, 5000, 6000),
-      currentMonth: new Date(2026, 0, 1),
       retDate:      new Date(2026, 1, 1),
       raises: [{ date: new Date(2026, 0, 1), rate: 0.05 }],
       N: 3,
@@ -134,7 +166,6 @@ test('projectAfcAtRetirement', async (t) => {
   await t.test('4. NR-dominated past, far-term retDate → past total still wins', () => {
     const afc = projectAfcAtRetirement({
       stream: flatStream(2021, 0, 60, 5000, 6000),
-      currentMonth: new Date(2026, 0, 1),
       retDate:      new Date(2029, 0, 1),            // 37 future months at 5250
       raises: [{ date: new Date(2026, 0, 1), rate: 0.05 }],
       N: 3,
@@ -148,7 +179,6 @@ test('projectAfcAtRetirement', async (t) => {
     // Four 5% raises compound to 1.05^4 ≈ 1.2155, exceeding the 6000/5000 = 1.20 markup.
     const afc = projectAfcAtRetirement({
       stream: flatStream(2021, 0, 60, 5000, 6000),
-      currentMonth: new Date(2026, 0, 1),
       retDate:      new Date(2032, 11, 1),           // 48 months at maximally-raised
       raises: [
         { date: new Date(2026, 0, 1), rate: 0.05 },
@@ -171,7 +201,6 @@ test('projectAfcAtRetirement', async (t) => {
     const stream = flatStream(2016, 0, 120, base, base);
     const projected = projectAfcAtRetirement({
       stream,
-      currentMonth: new Date(2026, 0, 1),
       retDate,
       raises: RAISES,
       N: 3,
@@ -187,7 +216,6 @@ test('projectAfcAtRetirement', async (t) => {
     // 11 past + 1 future = 12 months → exactly 1 window; need 3 for N=3.
     const afc = projectAfcAtRetirement({
       stream: flatStream(2025, 1, 11, 5000, 5000),   // Feb–Dec 2025
-      currentMonth: new Date(2026, 0, 1),
       retDate:      new Date(2026, 0, 1),
       raises: [],
       N: 3,
@@ -195,5 +223,114 @@ test('projectAfcAtRetirement', async (t) => {
       lastDayOfSvc: null,
     });
     assert.equal(afc, null);
+  });
+
+  await t.test('8. empty stream → null', () => {
+    const afc = projectAfcAtRetirement({
+      stream: [],
+      retDate: new Date(2030, 0, 1),
+      raises: RAISES, N: 5, mode: 'regular', lastDayOfSvc: null,
+    });
+    assert.equal(afc, null);
+  });
+});
+
+// ── calculateSeries (Stage 4 wiring) ──────────────────────────────────
+const nextMonthStart = () => {
+  const t = new Date();
+  return new Date(t.getFullYear(), t.getMonth() + 1, 1);
+};
+
+const flatPastStream = (currentMonth, n, regular, total) => {
+  const out = [];
+  const y = currentMonth.getFullYear();
+  const m = currentMonth.getMonth() - n;
+  for (let i = 0; i < n; i++) {
+    out.push({ month: new Date(y, m + i, 1), regular, total });
+  }
+  return out;
+};
+
+const baseInputs = (overrides = {}) => ({
+  plan: 'hybrid-post2012',
+  dob: new Date(1960, 0, 1),
+  enteredSvcMonths: 180,
+  ncSvcMonths: 0,
+  asOfDate: new Date(2024, 0, 1),
+  lastDayOfSvc: null,
+  afcMonthly: 5000,
+  slHours: null,
+  slRate: 14,
+  slAsOf: null,
+  paystubStream: null,
+  ...overrides,
+});
+
+test('calculateSeries: paystubStream wiring', async (t) => {
+  await t.test('1. manual AFC path → all raise-related fields are null', () => {
+    const series = calculateSeries(baseInputs());
+    for (const row of series) {
+      assert.equal(row.pensionWithRaises, null);
+      assert.equal(row.pensionRaisesCurrentSL, null);
+      assert.equal(row.pensionRaisesProjectedSL, null);
+    }
+  });
+
+  await t.test('2. saturated regular-only paystub → matches legacy applyRaises', () => {
+    const start = nextMonthStart();
+    const stream = flatPastStream(start, 60, 5000, 5000);
+    const series = calculateSeries(baseInputs({
+      paystubStream: stream,
+    }));
+    // hybrid-post2012 has N=5; last RAISE 2028-07-01 → saturation at retDate ≥ 2033-07-01.
+    const row = series.find(r => r.retDate >= new Date(2033, 6, 1) && r.pensionWithRaises != null);
+    assert.ok(row, 'expected at least one saturated row with pensionWithRaises set');
+    // Reconstruct what the legacy applyRaises path would have produced.
+    const plan = 'hybrid-post2012';
+    const config = PLAN_CONFIGS[plan];
+    const dob = new Date(1960, 0, 1);
+    const svcAtM = serviceAtMonth(180, new Date(2024, 0, 1), row.retDate, null);
+    const eligAge = primaryEligAge(dob, row.retDate);
+    const arfAge  = primaryArfAge(dob, row.retDate);
+    const offElig = primaryEligibility(plan, eligAge, Math.floor(svcAtM / 12));
+    const arf     = primaryARF(offElig, plan, arfAge.year, arfAge.month);
+    const legacyRaisedAfc = applyRaises(5000, row.retDate, config.N, null);
+    const expected = blendedBenefit(svcAtM, 0, legacyRaisedAfc, arf, plan, config);
+    assert.equal(row.pensionWithRaises, expected);
+  });
+
+  await t.test('3. NR-present noncontributory → projector stays at past total; gate suppresses curve', () => {
+    const start = nextMonthStart();
+    const stream = flatPastStream(start, 60, 5000, 6000);
+    const series = calculateSeries(baseInputs({
+      plan: 'noncontributory',
+      afcMonthly: 6000,        // what solveDP would give for this stream + mode='total'
+      paystubStream: stream,
+    }));
+    // Compounded RAISES (1.0379 × 1.04 × 1.04 ≈ 1.1226) never exceed the NR
+    // markup (6000/5000 = 1.20), so projector AFC stays at 6000 = afcMonthly,
+    // raisesActive is false, and pensionWithRaises is null on every row.
+    for (const row of series) {
+      assert.equal(row.pensionWithRaises, null);
+    }
+    // Sanity check: legacy applyRaises would have grown afcMonthly above 6000
+    // at a saturated retDate — confirming the divergence the projector fixes.
+    const sample = series.find(r => r.retDate >= new Date(2031, 6, 1));
+    if (sample) {
+      const legacy = applyRaises(6000, sample.retDate, 3, null);
+      assert.ok(legacy > 6000, `legacy applyRaises ${legacy} should exceed 6000`);
+    }
+  });
+
+  await t.test('4. lastDayOfSvc before first RAISE → raisesActive gate keeps pensionWithRaises null', () => {
+    const start = nextMonthStart();
+    const stream = flatPastStream(start, 60, 5000, 5000);
+    const series = calculateSeries(baseInputs({
+      paystubStream: stream,
+      lastDayOfSvc: new Date(2026, 5, 30),  // 2026-06-30, before first RAISE 2026-07-01
+    }));
+    for (const row of series) {
+      assert.equal(row.pensionWithRaises, null);
+    }
   });
 });

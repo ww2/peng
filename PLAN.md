@@ -123,7 +123,7 @@ Tests:
 1. Use the noncontributory URL from `notes.md` after wiring up paystubs (or whatever paystub fixture is available); inspect `_debug.lastPaystubStream`.
 2. Confirm a synthetic stub set spanning Jan–Jun produces 6 entries, no gaps.
 3. Confirm a stub set with a 1-month gap fills the gap with `{regular:0, total:0}`. |
-Status: Complete (5 cases passing in `tests/pension.test.js`; run with `node --test`)
+Status: Complete with amendment (truncation rule added 2026-05-06; see below)
 
 Notes:
 - Paystubs never cross calendar-month boundaries (decided per project
@@ -133,6 +133,21 @@ Notes:
   sum together. No proration logic needed.
 - Stage 3 will consume this; keep the function pure (input: stubs array;
   output: stream).
+- **Trailing-incomplete-month truncation (amendment).** The output stream
+  drops any trailing month that isn't anchored by a stub whose `endDate`
+  falls on the last day of its calendar month — mirroring `generateWindows`'
+  `lastAnchorEnd` logic at `lib/pension.js:608-616`. Rationale: surfaced
+  during Stage 4.4 smoke test — the most recent calendar month often has
+  only the first stub of its pay period at extraction time, so its
+  `regular` value is roughly half the typical month. Used as the
+  projector's "current rate" base, that half-month value drove
+  saturated-future projections below past 12-month averages and
+  suppressed every raise curve. With truncation, `stream[last]` is
+  guaranteed to be a complete month and `base` is a stable "current rate"
+  estimate. If no stub anchors a month-end, the function returns `[]`
+  (caller falls back to manual-AFC behavior).
+- Additional test: trailing mid-month stub triggers truncation; the
+  resulting stream ends at the last fully-covered calendar month.
 
 ---
 
@@ -142,9 +157,9 @@ Goal: New pure function in `lib/pension.js`:
 
 ```
 projectAfcAtRetirement({
-  stream,        // [{month: Date, regular: Number, total: Number}], sorted ascending, gaps zero-filled
+  stream,        // [{month: Date, regular: Number, total: Number}], sorted ascending,
+                 //   calendar-contiguous (Stage 2 truncates trailing incomplete months)
   retDate,       // Date — candidate retirement date
-  currentMonth,  // Date (1st of month) — boundary between past and future
   raises,        // [{date: Date, rate: Number}] — usually the module RAISES export
   N,             // Number — averaging-window length in years (PLAN_CONFIGS[*].N)
   mode,          // 'regular' | 'total' | 'totalInclVacation' | 'totalExclVacation'
@@ -153,21 +168,30 @@ projectAfcAtRetirement({
 ```
 
 Returns the projected monthly AFC at `retDate`, or `null` if fewer than N
-twelve-month windows are available.
+twelve-month windows are available, or if `stream` is empty.
+
+The past/future boundary is derived from the stream itself: future
+projection starts at the calendar month immediately after `stream[last].month`.
+Caller does not pass a `currentMonth` — the truncated stream's last month
+IS the boundary.
 
 Algorithm:
 
-1. **Regular base.** Walk `stream` from the latest entry backward and take
-   the first non-zero `regular`. If none (stream empty or all zero), base = 0.
+1. **Regular base.** `base = stream[last].regular` if non-zero, else walk
+   backward to the first non-zero entry. If `stream` is empty or all-zero,
+   return `null`.
 2. **Projection horizon.** Let `cap = min(retDate, lastDayOfSvc ?? retDate)`,
    collapsed to the 1st of its calendar month. Generate one future entry per
-   month from `currentMonth` (1st) through `cap` inclusive. Each future
-   entry's `regular = base × Π_{r ∈ raises, r.date ≤ month}(1 + r.rate)`;
+   month from `addMonths(stream[last].month, 1)` through `cap` inclusive.
+   Each future entry's `regular = base × Π_{r ∈ raises, r.date ≤ month}(1 + r.rate)`;
    `total = regular` (future NR is always 0 per the project decision).
-3. **Concatenate.** `all = past ++ future`, where `past` keeps only stream
-   entries with `month < currentMonth`. Stream entries at or after
-   `currentMonth` (if any) are dropped — the projection is authoritative
-   for those months.
+   If `cap < stream[last].month + 1`, future is empty.
+3. **Concatenate.** `all = stream.filter(s => s.month <= cap).concat(future)`.
+   The filter handles the case where `lastDayOfSvc` is in the past, capping
+   the past portion. Because stream is calendar-contiguous and future
+   begins immediately after stream's last month, `all` is calendar-contiguous
+   by construction — array index `i` and `i+12` are exactly 12 calendar
+   months apart, which is what the DP requires.
 4. **Score.** Per-month score `s(m)`:
    - `'regular'` → `m.regular`
    - `'total'` or `'totalInclVacation'` → `m.total`
@@ -207,19 +231,21 @@ Success:
   the cumulative raise multiplier on `regular` exceeds `total / regular =
   1.20`. This is the documented divergence from `applyRaises` that
   motivates the refactor (DESIGN.md:168–176). |
-Tests (`tests/pension.test.js`):
+Tests (`tests/pension.test.js`) — wording assumes the boundary between past
+and future is `stream[last].month + 1`, NOT a separately-passed `currentMonth`:
 1. Flat stream `regular = total = 5000`, no raises, `mode = 'regular'`,
    any `retDate` with ≥ N×12 history → `5000` exactly.
 2. Flat stream `5000`, single raise `(D, 0.05)` where `D` is at least
-   `N × 12` months before `currentMonth`, `retDate ≥ D + N × 12 months`
+   `N × 12` months before `stream[last].month`, `retDate ≥ D + N × 12 months`
    (so all top windows are post-raise) → `5000 × 1.05 = 5250` exactly.
 3. Past `regular = 5000`, `total = 6000` for ≥ N×12 months; raise of 5%
-   at `currentMonth`; `retDate = currentMonth + 1 month`; `mode = 'total'`
-   → `6000` exactly (top N windows are all historical, scored at total).
-4. Same stream, `retDate = currentMonth + N × 12 months`; `mode = 'total'`
-   → `6000` exactly (still — projected future at 5250 < past total 6000;
-   top-N stays in the past). The dominance persists at any retDate until
-   compounded raises drive future regular above 6000.
+   at `stream[last].month + 1`; `retDate = stream[last].month + 2 months`;
+   `mode = 'total'` → `6000` exactly (top N windows are all historical,
+   scored at total).
+4. Same stream, `retDate = stream[last].month + 1 + N × 12 months`;
+   `mode = 'total'` → `6000` exactly (still — projected future at 5250 <
+   past total 6000; top-N stays in the past). The dominance persists at
+   any retDate until compounded raises drive future regular above 6000.
 5. Same stream, but with raises totalling > 20% (e.g. four 5% raises
    compounded at 1-yr intervals → ~21.6%); `retDate` chosen so
    `retDate ≥ last_raise + N × 12 months` AND there are ≥ N×12 future
@@ -231,10 +257,14 @@ Tests (`tests/pension.test.js`):
    N, null) = base × Π(1 + r_i)` to within 1¢.
 7. Edge case: insufficient windows — total `all.length < 12 × N` plus
    non-overlap forcing — returns `null`. |
-Status: Complete (7 cases passing in `tests/pension.test.js`; module export
-added; closed-form match with `applyRaises` verified on saturated
-module-RAISES scenario; NR-dominated past correctly persists at $6000
-across all retDate horizons until cumulative raises exceed the markup)
+Status: Complete with amendment (7 cases passing in `tests/pension.test.js`;
+amended 2026-05-06 to remove `currentMonth` parameter and derive the
+past/future boundary from `stream[last].month + 1`. Rationale: surfaced
+during Stage 4.4 smoke test — with `currentMonth = next month from today`
+and an incomplete trailing month in the stream, future projection started
+at the wrong point and a stale incomplete month corrupted `base`. New
+design: stream is calendar-contiguous and ends at the last complete month
+(per Stage 2 truncation); future continues from there with no gap.)
 
 Notes:
 - **Why partial blends do not match closed-form.** `applyRaises` is a
@@ -273,56 +303,234 @@ Notes:
 
 ## Stage 4: Wire the projector into `calculateSeries`
 
-Goal: Inside `calculateSeries` (`index.html:1321`), when a paystub stream is
-available, replace the `applyRaises(afcMonthly, …)` call at L1379 with
-`projectAfcAtRetirement({ stream, retDate, … })`. When no stream is
-available (manual AFC entry), set `pensionWithRaises`,
-`pensionRaisesCurrentSL`, and `pensionRaisesProjectedSL` to `null` for
-every row. |
-Success:
-- Existing curves on a no-paystub manual-AFC scenario are unchanged.
-- Paystub-driven scenarios now produce non-null `pensionWithRaises` rows
-  whose values are computed via the windowing projector (verifiable via
-  `window._debug.lastSeries`).
-- The `raisesActive` gate (`index.html:1380`) still suppresses the curve
-  when no scheduled raise lies between today and `lastDayOfSvc`. |
-Tests:
-1. Paystub-driven hybrid post-2012 (regular-only AFC plan): the new
-   projector's output matches the old `applyRaises` output to within 1¢.
-2. Paystub-driven noncontributory: the new projector's output diverges
-   from what `applyRaises` would have given (sanity-check the divergence
-   direction matches the DESIGN.md diagnosis).
-3. Manual AFC entry on any plan: no `pensionWithRaises` values appear in
-   `_debug.lastSeries`. |
-Status: Not Started
+Goal: Replace `applyRaises(afcMonthly, …)` at `lib/pension.js:482` with
+`projectAfcAtRetirement({ stream, retDate, … })` when a paystub stream is
+available. When no stream is available (manual AFC entry), force
+`pensionWithRaises`, `pensionRaisesCurrentSL`, and `pensionRaisesProjectedSL`
+to `null` for every row. The `raisesActive` gate continues to suppress
+raise curves when no scheduled raise lies in the projection horizon.
+
+### Stage 4.1: Plumbing — extend `calculateSeries` signature
+
+- Add one optional parameter: `paystubStream` (default `null`) — the array
+  from `buildPaystubStream`, or `null`/`[]` for manual-AFC scenarios.
+- Pull `mode` from `config.mode` (already on PLAN_CONFIGS), and `raises`
+  from the module's `RAISES` constant.
+- In `index.html:runCalculate`, compute
+  `paystubStream = lastStubs.length ? buildPaystubStream(lastStubs) : null;`
+  and pass it through. (Don't reuse `_debug.lastPaystubStream` — that's a
+  debug surface, not a data path.)
+- No math change yet; verify the existing `applyRaises` call still produces
+  identical output for both paths. |
+Success: existing tests still pass; manual smoke shows no chart change.
+
+Note: an earlier iteration of this substage threaded a `currentMonth`
+parameter alongside `paystubStream`. That parameter was removed during
+the Stage 4.4 smoke-test amendment — the projector now derives the
+past/future boundary from `stream[last].month + 1` (Stage 3 amendment).
+
+### Stage 4.2: Math swap
+
+- Inside `calculateSeries`, replace L482's `applyRaises` call with:
+  ```js
+  const raisedAfc = paystubStream && paystubStream.length
+    ? projectAfcAtRetirement({
+        stream: paystubStream, retDate,
+        raises: RAISES, N: config.N, mode: config.mode, lastDayOfSvc,
+      })
+    : null;
+  const raisesActive = raisedAfc != null && raisedAfc > afcMonthly;
+  const pensionWithRaises = (offElig === 'ineligible' || !raisesActive) ? null
+    : blendedBenefit(svcAtM, ncSvcMonths, raisedAfc, arf, plan, config);
+  ```
+- The SL-bearing branches use the same `raisedAfc`; when it's `null`, both
+  `pensionRaisesCurrentSL` and `pensionRaisesProjectedSL` stay `null`.
+- Edge case: if the projector returns `null` (insufficient windows), treat
+  it the same as no stream — raise curves are inactive for that retDate.
+- Update `noRaisesApply` lock in `index.html:1406` to be a no-op for the
+  manual-AFC path (since `pensionWithRaises` is now structurally null
+  there); behavior unchanged for paystub path. |
+Success: Stage 4.3 tests pass; browser smoke passes.
+
+### Stage 4.3: Tests in `tests/pension.test.js`
+
+Test `calculateSeries` directly (it's pure, exported from `lib/pension.js`):
+
+1. **Manual-AFC manual path:** `paystubStream = null`, hybrid-post2012 plan,
+   reasonable inputs → every row's `pensionWithRaises`,
+   `pensionRaisesCurrentSL`, `pensionRaisesProjectedSL` is `null`.
+2. **Saturated regular-only paystub path:** `paystubStream` is a 60-month
+   flat regular≡total stream at $5000, hybrid-post2012 (mode='regular',
+   N=5), `lastDayOfSvc = null`, `currentMonth = today's next month`. For
+   any row whose `retDate ≥ last_RAISE + 5 yr`, the row's projector AFC
+   matches the legacy `applyRaises(5000, retDate, 5, null)` to within
+   1¢ → `pensionWithRaises` matches what the old code would produce.
+3. **NR-present noncontributory paystub path:** stream has 60 past months
+   with `regular = 5000, total = 6000`, noncontributory plan (mode='total',
+   N=3). For a near-term `retDate` the projector's AFC is `6000` while
+   `applyRaises(5000, retDate, 3, null)` would give a smaller value —
+   verify the divergence direction (projector ≥ legacy) and magnitude
+   matches expectations.
+4. **No-raises-in-horizon:** `paystubStream` present but
+   `lastDayOfSvc < first scheduled RAISE` → `raisedAfc` (when computed)
+   equals `afcMonthly`, so `raisesActive = false` and `pensionWithRaises`
+   stays `null`. Validates the gate still works. |
+Success: all four tests pass via `node --test`.
+
+### Stage 4.4: Browser smoke test
+
+User runs the calculator with:
+1. Paystub directory loaded, hybrid plan → `_debug.lastSeries` rows have
+   non-null `pensionWithRaises` for retDates past saturation. Chart
+   unchanged (raise curves still suppressed by `showRaises = false`).
+2. Manual AFC only → `_debug.lastSeries` rows all have null
+   `pensionWithRaises`. Chart unchanged.
+3. Paystub + `lastDayOfSvc` before the first scheduled raise →
+   "Projected raises do not apply" checkbox auto-locks (existing
+   `noRaisesApply` logic). |
+Success: no console errors; both scenarios render identically to
+pre-Stage-4 chart.
+
+### Stage 4.5: Real-data robustness — truncate incomplete trailing months
+
+Discovered during the first attempt at Stage 4.4 smoke. With actual
+paystubs (89-month stream), Scenario 1 saw zero rows with non-null
+`pensionWithRaises`. Root cause: the most recent calendar month had only
+the first half of its pay period (one stub instead of the usual two), so
+the stream's last `regular` value was ~half the typical month. Used as
+the projector's `base`, that depressed value made saturated future
+projections (`base × 1.1226`) lose to past 12-month averages, so the
+raise gate (`raisedAfc > afcMonthly`) never fired.
+
+Fix:
+1. **`buildPaystubStream`** truncates trailing months that aren't anchored
+   by a stub whose `endDate` is the last day of its calendar month
+   (mirroring `generateWindows`'s `lastAnchorEnd` logic at
+   `lib/pension.js:608-616`). Returns `[]` if no month-end stub exists.
+2. **`projectAfcAtRetirement`** drops the `currentMonth` parameter and
+   derives the past/future boundary from `addMonths(stream[last].month, 1)`.
+   Future projection now picks up exactly where the (truncated) stream
+   leaves off — no calendar gap, no need to zero-fill, and the array-index
+   DP correctly enforces 12 consecutive calendar months because `all` is
+   contiguous by construction.
+3. **`calculateSeries`** drops `currentMonth` from its signature and
+   from the `projectAfcAtRetirement` call.
+4. **`runCalculate`** drops the corresponding argument.
+5. **Existing tests** updated:
+   - `buildPaystubStream` tests: stub `endDate`s switched from mid-month
+     (e.g. day 28) to actual month-ends (31, 30, 29-for-Feb-leap).
+   - `projectAfcAtRetirement` tests: `currentMonth` argument removed;
+     stream is constructed to end at the desired past/future boundary.
+   - `calculateSeries` tests: `currentMonth` argument removed.
+6. **New tests:**
+   - `buildPaystubStream` drops a trailing mid-month stub; resulting
+     stream ends at the prior fully-covered month.
+   - `buildPaystubStream` returns `[]` if no month-end stub exists.
+   - `projectAfcAtRetirement` reproduces Scenario 1's expected behavior:
+     90-month flat stream + module RAISES, hybrid-post2012 saturation
+     retDate → projector returns `base × Π(1 + r_i)` and exceeds the
+     past-only top-N average. |
+Success: full test suite green; Stage 4.4 smoke passes.
+
+Status: Complete (4.1–4.3 + 4.5 + 4.4 all green; 22 tests passing; smoke
+verified Scenarios 1, 2, 3. Notable late discovery: `raisesActive` gate
+needed widening to `... && anyRaiseInHorizon` because a fresh-base future
+month can lift the projector's top-N above `solveDP`'s past-only result
+even when no raise is in scope. Fix landed in `lib/pension.js:496-501`.)
 
 ---
 
 ## Stage 5: Un-suppress raise curves for the paystub path
 
-Goal: Replace the hardcoded `showRaises = false` (at `index.html:2018` and
-`:2498`) with a derived flag: raise curves render iff a paystub stream is
-present AND the user hasn't checked "Projected raises do not apply" AND no
-committed `lastDayOfSvc` cutoff has eliminated all raises. Hide the
-`#group-contractual-input` fieldset when no paystub stream is present (since
-its only job is to gate raises). |
-Success:
-- Manual-entry users see no raises UI at all (no fieldset, no checkbox, no
-  curves, no table columns, no legend entries).
-- Paystub users see the contractual fieldset and raise curves; the
-  "Projected raises do not apply" checkbox correctly suppresses curves
-  while leaving the manual-AFC path unaffected.
-- Hover tooltip's COLA suffix logic (`index.html:2701+`) handles the new
-  "raises only present in some scenarios" reality without errors. |
-Tests:
-1. Manual-AFC scenario: no raise UI visible, no console errors.
-2. Paystub-AFC scenario (hybrid post-2012): four purple raise curves
-   appear; toggling raisesNA hides them.
-3. Paystub-AFC scenario with `lastDayOfSvc` set before any future raise:
-   raise curves remain hidden (existing `raisesActive` gate still works).
-4. Hover tooltip on every curve in a paystub scenario shows the right
-   suffix. |
-Status: Not Started
+Goal: Reveal the projected-raises UI (table + checkbox + four purple chart
+curves + estimation-table columns) **only when a paystub stream is driving
+the calculator**, since manual-AFC entries have no per-month structure to
+project from. The `showRaises` flag is currently hardcoded `false` in two
+sites (`index.html:1416`, `:1879`); the contractual fieldset is hidden via
+`hidden` attribute (`:451`); and a `<!-- Temporarily suppressed -->` comment
+(`:448-450`) explains the freeze. All three need to come down or become
+data-driven.
+
+Pre-existing issues uncovered while auditing for this stage:
+- The hardcoded `<tbody>` at `:459-463` lists four raises, including a
+  stale `2025-07-01 @ 3.50%` that doesn't exist in the module's `RAISES`
+  constant (which has only the 2026/2027/2028 entries). Once the fieldset
+  un-hides, this divergence becomes user-visible.
+- `applyRaisesNALock` already handles the `lastDayOfSvc < first raise`
+  case correctly; no logic change needed there.
+
+### Stage 5.1: Wire `showRaises` from the data path
+
+- In `runCalculate` (`index.html:1410-1418`), derive
+  `showRaises = paystubStream != null && !raisesNA`.
+- Pass `showRaises` to both `drawChart` and `drawSeriesTable`. Drop the
+  redundant `raisesNA` parameter from `drawChart` — `showRaises` already
+  encodes the user-checkbox gate.
+- Remove the hardcoded `const showRaises = false;` at both `:1416` (the
+  caller site) and `:1879` (inside `drawChart`).
+- The chart's per-curve `raisesActive`-gate at row level
+  (`pensionWithRaises != null`, etc.) already short-circuits when raises
+  don't apply, so changing only the top-level `showRaises` is sufficient. |
+Success: existing tests still pass; manual smoke shows the fieldset still
+hidden via the `hidden` HTML attribute (since 5.2 hasn't fired yet) but
+chart and table now react to a derived flag.
+
+### Stage 5.2: Toggle the contractual fieldset visibility
+
+- Remove the `hidden` attribute and the "Temporarily suppressed" comment
+  block at `index.html:447-451`.
+- Add a small helper `setContractualVisible(visible)` that toggles
+  `document.getElementById('group-contractual-input').hidden`.
+- Call it from `runCalculate` with `paystubStream != null`, and from
+  `runClear` (`:1416-1438`) and the paystub cancel/error paths with
+  `false` so the fieldset re-hides when paystubs are cleared. |
+Success: manual smoke — fieldset hidden until paystubs load, visible
+after, hidden again after `runClear`.
+
+### Stage 5.3: Generate the raises table from `RAISES`
+
+- Replace the hardcoded `<tbody>` at `:457-464` with an empty `<tbody
+  id="raises-table-body">`.
+- At inline-script init time (after `lib/pension.js` loads, so `RAISES` is
+  defined), populate the tbody by iterating `RAISES`:
+  `<tr><td>${fmtDate(r.date)}</td><td>${(r.rate * 100).toFixed(2)}%</td></tr>`.
+- This eliminates the stale `2025-07-01` row and makes the displayed
+  table self-updating if `RAISES` is later edited. |
+Success: rendered table matches `RAISES` exactly; only the three current
+entries are listed; rate-format matches the prior visual (e.g. "3.79%").
+
+### Stage 5.4: Browser smoke
+
+Three scenarios; all expectations are visual + console:
+
+1. **Manual AFC only.**
+   `file:///…/index.html?plan=hybrid&memDate=2014-08-01&dob=1960-01-01&svcYears=15&svcAsOf=2024-01-01&afc=5000`
+   - Click Generate.
+   - Expect: `#group-contractual-input` hidden (no raises table or checkbox
+     visible); chart has no purple curves; estimation-table headers do NOT
+     include `+ raises`; `_debug.lastSeries.every(r => r.pensionWithRaises === null)`
+     is `true`.
+
+2. **Paystub-driven hybrid.**
+   `file:///…/index.html?plan=hybrid&memDate=2014-08-01&dob=1960-01-01&svcYears=15&svcAsOf=2024-01-01`
+   - Load paystub directory; click Generate.
+   - Expect: `#group-contractual-input` visible; raises table shows
+     2026-07-01 @ 3.79%, 2027-07-01 @ 4.00%, 2028-07-01 @ 4.00% (NO
+     2025-07-01 row); purple curves appear on the chart; estimation-table
+     headers include `+ raises` (and `+ raises + …SL` if SL fields filled);
+     toggling "Projected raises do not apply" hides curves AND columns;
+     toggling back restores.
+
+3. **Paystub + `lastDayOfSvc` before first RAISE.**
+   `file:///…/index.html?plan=hybrid&memDate=2014-08-01&dob=1960-01-01&svcYears=15&svcAsOf=2024-01-01&lastDay=2026-06-30`
+   - Load paystubs; click Generate.
+   - Expect: fieldset visible; checkbox auto-locked
+     (`document.getElementById('raises-na').checked === true` AND `.disabled === true`);
+     label suffix "due to the Last day of service above"; no purple
+     curves on chart; estimation-table has no `+ raises` columns. |
+Success: all three scenarios behave as expected; no console errors.
+
+Status: 5.1 / 5.2 / 5.3 / 5.4 — Not Started
 
 ---
 
