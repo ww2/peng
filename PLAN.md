@@ -138,57 +138,136 @@ Notes:
 
 ## Stage 3: Implement the windowing AFC projector
 
-Goal: New pure function
-`projectAfcAtRetirement({ stream, retDate, currentMonth, raises, N, mode, lastDayOfSvc })`
-that returns the AFC the member would have at `retDate` given the historical
-`stream`, applying scheduled `raises` to the regular-pay portion only for
-months between `currentMonth` and the earlier of `retDate` and `lastDayOfSvc`.
+Goal: New pure function in `lib/pension.js`:
+
+```
+projectAfcAtRetirement({
+  stream,        // [{month: Date, regular: Number, total: Number}], sorted ascending, gaps zero-filled
+  retDate,       // Date — candidate retirement date
+  currentMonth,  // Date (1st of month) — boundary between past and future
+  raises,        // [{date: Date, rate: Number}] — usually the module RAISES export
+  N,             // Number — averaging-window length in years (PLAN_CONFIGS[*].N)
+  mode,          // 'regular' | 'total' | 'totalInclVacation' | 'totalExclVacation'
+  lastDayOfSvc,  // Date | null — caps future projection (separation)
+}) → Number | null
+```
+
+Returns the projected monthly AFC at `retDate`, or `null` if fewer than N
+twelve-month windows are available.
 
 Algorithm:
-1. Concatenate `stream` (past) with a projected future array from
-   `currentMonth` through `min(retDate, lastDayOfSvc)`. Each future month's
-   `regular` = (current monthly regular base, derived as the most recent
-   non-zero `stream[*].regular`) × Π(1 + rate) for raises whose date is
-   ≤ that future month. Future `total` = future `regular` (no NR
-   projection).
-2. Score each calendar month under the requested `mode`:
-   - `mode === 'regular'`: use the month's `regular` value.
-   - `mode === 'total'` / `'totalInclVacation'`: use `total`.
-   - `mode === 'totalExclVacation'`: needs a third stream column (vacation
-     payout per month). Defer or zero-fill until pre-1971 dual-method is
-     wired in — flag as TODO.
-3. Form 12-month rolling sums (or averages); pick the top N annual
-   averages by value (must be among the months at-or-before `retDate`).
-   Their mean × (config-specific divisor handling) = projected monthly AFC.
-4. Return that AFC.
+
+1. **Regular base.** Walk `stream` from the latest entry backward and take
+   the first non-zero `regular`. If none (stream empty or all zero), base = 0.
+2. **Projection horizon.** Let `cap = min(retDate, lastDayOfSvc ?? retDate)`,
+   collapsed to the 1st of its calendar month. Generate one future entry per
+   month from `currentMonth` (1st) through `cap` inclusive. Each future
+   entry's `regular = base × Π_{r ∈ raises, r.date ≤ month}(1 + r.rate)`;
+   `total = regular` (future NR is always 0 per the project decision).
+3. **Concatenate.** `all = past ++ future`, where `past` keeps only stream
+   entries with `month < currentMonth`. Stream entries at or after
+   `currentMonth` (if any) are dropped — the projection is authoritative
+   for those months.
+4. **Score.** Per-month score `s(m)`:
+   - `'regular'` → `m.regular`
+   - `'total'` or `'totalInclVacation'` → `m.total`
+   - `'totalExclVacation'` → `m.total` for now (TODO: subtract per-month
+     vacation column once `buildPaystubStream` adds one; pre-1971 dual-method
+     is the only consumer)
+5. **Rolling 12-month sums.** For every starting index `i` in `all` with
+   `i + 12 ≤ all.length`, form `S_i = Σ_{j=0..11} s(all[i+j])`. Discard any
+   window whose last month exceeds `retDate`'s calendar month (in practice
+   none, since `cap ≤ retDate` already bounds `all`).
+6. **Top-N non-overlapping selection (DP).** Pick the `N` highest-summing
+   windows subject to no two windows sharing any month — matching the
+   official ERS rule ("highest twelve consecutive months throughout your
+   career, the next highest, …"; see
+   `info/Retirement-Information-Noncontributory-eff.-6.2022.md:113`) and
+   the existing `solveDP` semantics for paystub-driven AFC. Standard DP:
+   `dp[k][i]` = best sum of `k` windows whose last window ends at or
+   before month-index `i`; recurrence
+   `dp[k][i] = max(dp[k][i-1], dp[k-1][i-12] + S_{i-11})`. Return `null`
+   if `dp[N][last]` is undefined (insufficient windows).
+7. **Average.** AFC = `dp[N][last] / (N × 12)`.
+
 |
 Success:
-- Pure function with no DOM dependencies.
-- For a stream where every month's `regular` equals every month's `total`
-  (no non-regular pay), the projector's output for a `retDate` past the
-  last raise matches `applyRaises(scalarAfc, retDate, N, lastDayOfSvc)`
-  to within 1¢. (This is the closed-form exactness check.)
-- For a stream where past months have `total > regular` (NR present) and
-  the future has only regular, the projector's value at a `retDate` only
-  a few months out is closer to the historical `total`-based AFC, not
-  the raised-regular value — and it rises continuously toward the
-  raised-regular AFC as `retDate` extends past the N-year window. |
-Tests:
-1. Synthetic flat stream, no raises → projector returns the flat
-   monthly value.
-2. Synthetic flat stream, single raise at month 0 → projector at month
-   `12 × N + 1` returns flat × (1 + rate).
-3. Synthetic flat stream, single raise at month 0 → projector at month
-   `12 × (N/2)` returns approximately flat × (1 + rate × 0.5)
-   (within 1¢; the rolling window discretises the linear blend).
-4. Synthetic stream where past regular = $5000, past NR = $1000/month,
-   raise of 5%, retDate one month out → projector returns approximately
-   $6000 (the historical total dominates — raises haven't had time to
-   replace the NR-inclusive past).
-5. Same stream, retDate `12 × N` months out → projector returns
-   approximately $5250 (raised regular alone; the NR-inclusive past
-   has aged out of the window). |
-Status: Not Started
+- Pure function, no DOM. Lives in `lib/pension.js`, exported alongside
+  `applyRaises`.
+- **Closed-form exactness (saturated):** For a stream where `regular ≡
+  total` at every month, every raise dated at least `N × 12` months
+  before `retDate`, and ≥ `N × 12` months of constant pre-raise history,
+  the projector output equals `applyRaises(base, retDate, N, lastDayOfSvc)
+  = base × Π(1 + r_i)` to within 1¢. (All top-N windows are entirely
+  post-all-raises and have identical sum.) See Notes for why partial
+  blends do NOT match closed-form.
+- **NR-dominated past:** For past `regular = 5000`, `total = 6000`,
+  single 5% raise at `currentMonth`, `mode = 'total'`: regardless of how
+  far out `retDate` extends, AFC stays at `6000` (the past total) until
+  the cumulative raise multiplier on `regular` exceeds `total / regular =
+  1.20`. This is the documented divergence from `applyRaises` that
+  motivates the refactor (DESIGN.md:168–176). |
+Tests (`tests/pension.test.js`):
+1. Flat stream `regular = total = 5000`, no raises, `mode = 'regular'`,
+   any `retDate` with ≥ N×12 history → `5000` exactly.
+2. Flat stream `5000`, single raise `(D, 0.05)` where `D` is at least
+   `N × 12` months before `currentMonth`, `retDate ≥ D + N × 12 months`
+   (so all top windows are post-raise) → `5000 × 1.05 = 5250` exactly.
+3. Past `regular = 5000`, `total = 6000` for ≥ N×12 months; raise of 5%
+   at `currentMonth`; `retDate = currentMonth + 1 month`; `mode = 'total'`
+   → `6000` exactly (top N windows are all historical, scored at total).
+4. Same stream, `retDate = currentMonth + N × 12 months`; `mode = 'total'`
+   → `6000` exactly (still — projected future at 5250 < past total 6000;
+   top-N stays in the past). The dominance persists at any retDate until
+   compounded raises drive future regular above 6000.
+5. Same stream, but with raises totalling > 20% (e.g. four 5% raises
+   compounded at 1-yr intervals → ~21.6%); `retDate` chosen so
+   `retDate ≥ last_raise + N × 12 months` AND there are ≥ N×12 future
+   months at the maximally-raised value `5000 × 1.05^4 ≈ 6077`; mode =
+   `'total'` → AFC equals `5000 × 1.05^4` exactly (future now beats past).
+6. Equivalence with `applyRaises` over the module's real `RAISES` array:
+   flat regular≡total stream of length ≥ N×12, `retDate ≥ last raise +
+   N × 12 months` → projector output equals `applyRaises(base, retDate,
+   N, null) = base × Π(1 + r_i)` to within 1¢.
+7. Edge case: insufficient windows — total `all.length < 12 × N` plus
+   non-overlap forcing — returns `null`. |
+Status: Complete (7 cases passing in `tests/pension.test.js`; module export
+added; closed-form match with `applyRaises` verified on saturated
+module-RAISES scenario; NR-dominated past correctly persists at $6000
+across all retDate horizons until cumulative raises exceed the markup)
+
+Notes:
+- **Why partial blends do not match closed-form.** `applyRaises` is a
+  linear-blend heuristic that approximates the average over the N-year
+  window ending at `retDate`. The official ERS rule is top-N
+  *non-overlapping* highest-paid 12-month periods (anywhere in the
+  career), which `solveDP` and this projector implement. With a single
+  raise mid-window, the rolling-window approximation `X · (1 + r · k/(N×12))`
+  used by `applyRaises` differs from the actual non-overlapping-DP
+  selection by a discretization remainder and a boundary off-by-one in
+  `monthsBetween`. The two converge only when blends saturate to 1
+  (raise ≥ N years before `retDate`), at which point every top-N window
+  has identical post-all-raises score and both formulas reduce to
+  `base × Π(1 + r_i)`.
+- **Why multi-raise needs full saturation for closed-form match.**
+  `applyRaises` compounds blends: `Π(1 + r_i · b_i)`. Even ignoring the
+  partial-blend issue above, the compounded form differs from the
+  averaged-cohorts form unless every `b_i = 1`. For our union contract
+  (raises ~1 yr apart) and `N = 5`, `retDate ≥ last_raise + 5 yr` is the
+  saturation threshold for an exact match.
+- **Monotonicity & pruning (informational; do not implement in Stage 3).**
+  The optimal top-N is monotone non-decreasing in `retDate`: any window
+  feasible at `retDate = t` is still feasible at `t' > t`, and new
+  candidate windows added between `t` and `t'` lie strictly in the
+  future. Therefore the threshold (Nth-highest selected sum) at `t` is a
+  lower bound on the threshold at any `t' > t`, and any past or future
+  window with sum strictly below the running threshold can never enter
+  the optimal solution at any future `retDate`. This enables an
+  incremental DP across the 600 retDate rows in `calculateSeries` —
+  carry forward the dp[][] state and the discard set rather than
+  re-running solveDP from scratch each call. Defer to Stage 4 (or later);
+  Stage 3 should implement the simple per-retDate DP and verify
+  correctness first.
 
 ---
 
