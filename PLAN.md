@@ -69,7 +69,7 @@ Tests:
 3. The synthetic Stage 2 unit tests can be rewritten as
    `const { buildPaystubStream } = require('./lib/pension.js')` instead
    of the awk-extract pattern. |
-Status: In Progress
+Status: Complete
 
 What moves (pure):
 - Constants: `IGNORED`, `LUMP_SUM_VACATION`, `PRE_1971_DATE`, `RAISES`,
@@ -123,7 +123,7 @@ Tests:
 1. Use the noncontributory URL from `notes.md` after wiring up paystubs (or whatever paystub fixture is available); inspect `_debug.lastPaystubStream`.
 2. Confirm a synthetic stub set spanning Jan–Jun produces 6 entries, no gaps.
 3. Confirm a stub set with a 1-month gap fills the gap with `{regular:0, total:0}`. |
-Status: Not Started
+Status: Complete (5 cases passing in `tests/pension.test.js`; run with `node --test`)
 
 Notes:
 - Paystubs never cross calendar-month boundaries (decided per project
