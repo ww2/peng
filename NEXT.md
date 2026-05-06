@@ -1,14 +1,7 @@
 # caching
-Should clearing all form fields immediately update all of the urlParams in the URL?
-For testing it's been somewhat useful that the URL doesn't get updated, but in actual use, it seems
-odd to have the url params not get cleared when I explicitly ask for the form to clear, especially
-if the 'cache' urlParam is already being dynamically added to or removed from the URL
-
-If the cache is populated, and the user clicks 'Clear all fields', go ahead and reset the
-'use cache' checkbox to unchecked.
-
 If the cache is populated, and the 'use cache' checkbox is checked, and the user selects a directory to scan,
 is there enough information in the cache to allow you to avoid re-scanning paystubs which are already in the cache?
+Or would that make the scanning code needlessly more complex?
 
 Should every raise whose start date is in the past be dropped from the table and projections?
 

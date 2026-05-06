@@ -1544,6 +1544,8 @@
       cancelRequested = false;
       window._debug.lastPaystubStream = [];
       clearCache();
+      cacheToggleEl.checked = false;
+      cacheMode             = false;
 
       // Picker UI
       pickerEl.value           = '';
@@ -1570,6 +1572,9 @@
       setMemDateBannerEntry(null);
 
       updateReloadLink();
+      // Strip URL params now that the form is empty and cache toggle is off —
+      // mirrors the cache-toggle handler's replaceState pattern.
+      history.replaceState(null, '', buildReloadUrl());
       drawChart();
       drawSeriesTable(null);
     }
