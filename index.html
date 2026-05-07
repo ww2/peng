@@ -1500,14 +1500,21 @@
         console.warn(`Sick leave hours (${slHours}) must be positive; ignoring.`);
       const isHybridPlan = planEl.value === 'hybrid';
       const paystubStream = lastStubs.length ? buildPaystubStream(lastStubs) : null;
+      const planKey = derivePlanKey(planEl.value, memDateEl.value);
+      const planConfig = PLAN_CONFIGS[planKey];
+      const manualAfc = parseFloat(manualAfcEl.value);
+      // Regular-mode plans extrapolate manual AFC through a synthetic stream
+      // in calculateSeries — mirror that gate here so the contractual fieldset
+      // and chart raise curves track when extrapolation is active.
+      const extrapolating = !paystubStream && planConfig?.mode === 'regular' && manualAfc > 0;
       const series  = calculateSeries({
-        plan             : derivePlanKey(planEl.value, memDateEl.value),
+        plan             : planKey,
         dob              : parseIsoDate(dobEl.value),
         enteredSvcMonths : (parseInt(svcYearsEl.value) || 0) * 12 + (parseInt(svcMonthsEl.value) || 0),
         ncSvcMonths      : isHybridPlan ? (parseInt(ncSvcYearsEl.value) || 0) * 12 + (parseInt(ncSvcMonthsEl.value) || 0) : 0,
         asOfDate,
         lastDayOfSvc,
-        afcMonthly       : parseFloat(manualAfcEl.value),
+        afcMonthly       : manualAfc,
         slHours          : isNaN(slHours) || slHours <= 0 ? null : slHours,
         slRate           : parseFloat(slRateEl.value) || 14,
         slAsOf,
@@ -1522,20 +1529,21 @@
       const isSeparated  = lastDayOfSvc !== null && lastDayOfSvc < today;
       // If lastDay caps the raises horizon so that no scheduled raise ever
       // blends into AFC, lock the "raises do not apply" checkbox on.
-      // Only meaningful when a paystub stream drives the projector — without
-      // one, pensionWithRaises is structurally null on every row.
+      // Meaningful whenever calculateSeries has a stream to project — paystubs
+      // OR the synthetic stream built for regular-mode manual-AFC users.
       // Detect "no raise actually lifted the AFC" via pensionWithRaises >
       // primaryPension (the gap-removal change in calculateSeries pins
       // pensionWithRaises to primaryPension when raises don't lift, so the
       // not-null check that used to suffice would now always be true).
-      const noRaisesApply = paystubStream !== null
+      const raisesProjected = paystubStream !== null || extrapolating;
+      const noRaisesApply = raisesProjected
         && lastDayOfSvc !== null && eligible.length > 0
         && !series.some(d => d.pensionWithRaises != null
                           && d.pensionWithRaises > d.primaryPension);
       applyRaisesNALock(noRaisesApply);
       const raisesNA     = raisesNaEl.checked;
-      const showRaises   = paystubStream !== null && !raisesNA;
-      setContractualVisible(paystubStream !== null);
+      const showRaises   = raisesProjected && !raisesNA;
+      setContractualVisible(raisesProjected);
       drawChart(series, { hasSL, isSeparated, showRaises });
       drawSeriesTable(series, { hasSL, showRaises });
     }

@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   buildPaystubStream,
+  buildSyntheticStream,
   projectAfcAtRetirement,
   applyRaises,
   blendedBenefit,
@@ -114,6 +115,40 @@ test('buildPaystubStream', async (t) => {
       stub(2024, 1, 1, 15, { Regular: 2000 }),
     ];
     assert.deepEqual(buildPaystubStream(stubs), []);
+  });
+});
+
+// ── buildSyntheticStream ─────────────────────────────────────────────
+test('buildSyntheticStream', async (t) => {
+  await t.test('default monthsBack=60, anchor at month-start → 60 ascending months ending at anchor', () => {
+    const anchor = new Date(2026, 4, 1);  // 2026-05-01
+    const stream = buildSyntheticStream(5000, anchor);
+    assert.equal(stream.length, 60);
+    assert.equal(stream[stream.length - 1].month.getTime(), anchor.getTime());
+    assert.equal(stream[0].month.getFullYear(), 2021);
+    assert.equal(stream[0].month.getMonth(), 5);  // June 2021
+    for (let i = 1; i < stream.length; i++) {
+      assert.ok(stream[i].month > stream[i - 1].month);
+    }
+    for (const e of stream) {
+      assert.equal(e.regular, 5000);
+      assert.equal(e.total, 5000);
+    }
+  });
+
+  await t.test('mid-month anchor snaps to first-of-month', () => {
+    const stream = buildSyntheticStream(4000, new Date(2026, 4, 17), 12);
+    assert.equal(stream.length, 12);
+    assert.equal(stream[stream.length - 1].month.getDate(), 1);
+    assert.equal(stream[stream.length - 1].month.getMonth(), 4);
+    assert.equal(stream[stream.length - 1].month.getFullYear(), 2026);
+  });
+
+  await t.test('custom monthsBack honored', () => {
+    const stream = buildSyntheticStream(3000, new Date(2026, 0, 1), 24);
+    assert.equal(stream.length, 24);
+    assert.equal(stream[0].month.getFullYear(), 2024);
+    assert.equal(stream[0].month.getMonth(), 1);  // Feb 2024
   });
 });
 
@@ -295,8 +330,11 @@ const baseInputs = (overrides = {}) => ({
 });
 
 test('calculateSeries: paystubStream wiring', async (t) => {
-  await t.test('1. manual AFC path → all raise-related fields are null', () => {
-    const series = calculateSeries(baseInputs());
+  await t.test('1. manual AFC on total-mode plan → all raise-related fields are null', () => {
+    // Regular-mode plans now extrapolate manual AFC through a synthetic
+    // stream (covered by separate test below); only total-mode plans
+    // suppress raises entirely without paystubs.
+    const series = calculateSeries(baseInputs({ plan: 'noncontributory' }));
     for (const row of series) {
       assert.equal(row.pensionWithRaises, null);
       assert.equal(row.pensionRaisesCurrentSL, null);
@@ -378,5 +416,68 @@ test('calculateSeries: paystubStream wiring', async (t) => {
         assert.equal(row.pensionWithRaises, row.primaryPension);
       }
     }
+  });
+
+  await t.test('5. regular-mode plan + manual AFC, no paystubs → raises extrapolate via synthetic stream', () => {
+    // Time-dependent: assertions track which RAISES entries are still future
+    // relative to today's first-of-month (the synthetic stream's anchor).
+    const now = new Date();
+    const anchorMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const futureRaises = RAISES.filter(r => r.date > anchorMonth);
+    if (!futureRaises.length) return;  // RAISES exhausted; nothing to assert.
+
+    const series = calculateSeries(baseInputs());  // hybrid-post2012, manual AFC=5000
+
+    // Saturated retDate: ≥ N years past the last future raise so all top-N
+    // windows fall entirely after the final raise.
+    const lastFuture = futureRaises[futureRaises.length - 1];
+    const satDate = new Date(lastFuture.date.getFullYear() + 6, lastFuture.date.getMonth(), 1);
+    const sat = series.find(r => r.retDate >= satDate && r.pensionWithRaises != null);
+    assert.ok(sat, 'expected at least one saturated row with pensionWithRaises set');
+
+    // Compare pensionWithRaises against the closed-form saturated value.
+    const plan = 'hybrid-post2012';
+    const config = PLAN_CONFIGS[plan];
+    const dob = new Date(1960, 0, 1);
+    const svcAtM = serviceAtMonth(180, new Date(2024, 0, 1), sat.retDate, null);
+    const eligAge = primaryEligAge(dob, sat.retDate);
+    const arfAge  = primaryArfAge(dob, sat.retDate);
+    const offElig = primaryEligibility(plan, eligAge, Math.floor(svcAtM / 12));
+    const arf     = primaryARF(offElig, plan, arfAge.year, arfAge.month);
+    const expectedRaisedAfc = 5000 * futureRaises.reduce((a, r) => a * (1 + r.rate), 1);
+    const expected = blendedBenefit(svcAtM, 0, expectedRaisedAfc, arf, plan, config);
+    // Tolerance absorbs floor-rounding inside blendedBenefit at saturation.
+    assert.ok(Math.abs(sat.pensionWithRaises - expected) <= 1,
+      `pensionWithRaises=${sat.pensionWithRaises} expected≈${expected}`);
+    assert.ok(sat.pensionWithRaises > sat.primaryPension,
+      `raises should lift AFC at saturation (${sat.pensionWithRaises} vs ${sat.primaryPension})`);
+  });
+
+  await t.test('6. regular-mode + manual AFC + lastDayOfSvc cuts off all RAISES → raises pin to primary', () => {
+    const now = new Date();
+    const anchorMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const firstFuture = RAISES.find(r => r.date > anchorMonth);
+    if (!firstFuture) return;  // No future raises to cut off.
+    // Pick lastDayOfSvc one day before the first future raise so the synthetic
+    // stream's projector caps before any raise can land.
+    const lastDayOfSvc = new Date(firstFuture.date.getTime() - 86400000);
+
+    const series = calculateSeries(baseInputs({ lastDayOfSvc }));
+    for (const row of series) {
+      if (row.primaryPension == null) {
+        assert.equal(row.pensionWithRaises, null);
+      } else {
+        assert.equal(row.pensionWithRaises, row.primaryPension);
+      }
+    }
+  });
+
+  await t.test('7. total-mode plan + manual AFC, no paystubs → no raise extrapolation', () => {
+    // Stronger version of test 1: actually look at a retDate where regular-
+    // mode would have lifted, and confirm total-mode still produces null.
+    const series = calculateSeries(baseInputs({ plan: 'noncontributory' }));
+    const farFuture = series.find(r => r.retDate >= new Date(2035, 0, 1) && r.primaryPension != null);
+    assert.ok(farFuture, 'expected an eligible far-future row');
+    assert.equal(farFuture.pensionWithRaises, null);
   });
 });
