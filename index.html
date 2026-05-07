@@ -612,7 +612,7 @@
     // load path passes the stream-end month so the table matches what the
     // projector actually applies.
     function renderRaisesTable(boundary) {
-      const now = new Date();
+      const now = todayInHST();
       const cutoff = boundary ?? new Date(now.getFullYear(), now.getMonth(), 1);
       raisesTableBodyEl.innerHTML = RAISES.filter(r => r.date > cutoff).map(r => {
         const m = String(r.date.getMonth() + 1).padStart(2, '0');
@@ -1378,7 +1378,7 @@
     function validateMemDate() {
       if (!memDateEl.value) { setMemDateBannerEntry(null); return true; }
       const md     = parseIsoDate(memDateEl.value);
-      const today  = new Date(); today.setHours(0, 0, 0, 0);
+      const today  = todayInHST();
       const future = md > today;
       const dob    = dobEl.value ? parseIsoDate(dobEl.value) : null;
       const beforeDob  = dob && md < dob;
@@ -1525,7 +1525,7 @@
       statusLine.textContent = eligible.length === 0
         ? 'No eligible retirement dates found.' : '';
       const hasSL        = !(isNaN(slHours) || slHours <= 0) && slAsOf !== null;
-      const today        = new Date(); today.setHours(0, 0, 0, 0);
+      const today        = todayInHST();
       const isSeparated  = lastDayOfSvc !== null && lastDayOfSvc < today;
       // If lastDay caps the raises horizon so that no scheduled raise ever
       // blends into AFC, lock the "raises do not apply" checkbox on.
@@ -1707,7 +1707,7 @@
 
     // ── "Still active" toggle controls Last day of service field ────
     function todayIso() {
-      const d = new Date();
+      const d = todayInHST();
       return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     }
 
@@ -2051,7 +2051,7 @@
 
       // ── Scales ─────────────────────────────────────────────────
       const COMPRESS_PX = 56;
-      const today = new Date();
+      const today = todayInHST();
       const fallbackXMin = new Date(today.getFullYear(), today.getMonth() + 1, 1);
       const fallbackXMax = new Date(today.getFullYear() + 15, today.getMonth() + 1, 1);
 

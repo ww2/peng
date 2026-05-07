@@ -1,9 +1,7 @@
-# tempus
-Would it be worthwhile to update all of the date/time logic in the app to use HST? The paystubs themselves are implictly using HST, and making that explicit might prevent issues if a user e.g. runs the app while located in a different time zone.
-
 # fixing COLA
 When the graph starts showing a straight line because the employee has retired, the
-COLA curve now also has that fixed starting point, so it should change from 'display on hover' to 'always display', with that fixed starting point
+COLA curve now also shares that fixed starting point; in that case, change it from
+'display on hover' to 'always display'.
 
 # visual sugar
 Add an input field near the graph which lets the user put an arbitrary 'cutoff' number in it and,

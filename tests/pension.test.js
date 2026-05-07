@@ -15,6 +15,7 @@ const {
   primaryARF,
   PLAN_CONFIGS,
   RAISES,
+  todayInHST,
 } = require('../lib/pension.js');
 
 const stub = (y, m, d1, d2, earnings) => ({
@@ -32,6 +33,61 @@ const summarize = (stream) =>
     regular: e.regular,
     total: e.total,
   }));
+
+// ── todayInHST ───────────────────────────────────────────────────────
+// Calendar "today" must be HST regardless of the wall-clock TZ. Tests
+// pass the instant explicitly via the helper's optional parameter so they
+// don't depend on system TZ.
+test('todayInHST', async (t) => {
+  await t.test('UTC instant 1 minute before HST midnight → previous calendar day', () => {
+    // 2026-05-07 09:59 UTC = 2026-05-06 23:59 HST
+    const d = todayInHST(new Date(Date.UTC(2026, 4, 7, 9, 59)));
+    assert.equal(d.getFullYear(), 2026);
+    assert.equal(d.getMonth(), 4);
+    assert.equal(d.getDate(), 6);
+  });
+  await t.test('UTC instant at HST midnight → next calendar day', () => {
+    // 2026-05-07 10:00 UTC = 2026-05-07 00:00 HST
+    const d = todayInHST(new Date(Date.UTC(2026, 4, 7, 10, 0)));
+    assert.equal(d.getFullYear(), 2026);
+    assert.equal(d.getMonth(), 4);
+    assert.equal(d.getDate(), 7);
+  });
+  await t.test('returned Date is local midnight (composes with addMonths etc.)', () => {
+    const d = todayInHST(new Date(Date.UTC(2026, 4, 7, 9, 59)));
+    assert.equal(d.getHours(), 0);
+    assert.equal(d.getMinutes(), 0);
+    assert.equal(d.getSeconds(), 0);
+    assert.equal(d.getMilliseconds(), 0);
+  });
+  await t.test('month boundary: HST is still in previous month while UTC has rolled', () => {
+    // 2026-06-01 05:00 UTC = 2026-05-31 19:00 HST
+    const d = todayInHST(new Date(Date.UTC(2026, 5, 1, 5, 0)));
+    assert.equal(d.getFullYear(), 2026);
+    assert.equal(d.getMonth(), 4);   // May
+    assert.equal(d.getDate(), 31);
+  });
+});
+
+// ── RAISES schedule ──────────────────────────────────────────────────
+// The RAISES dates must round-trip through getFullYear/getMonth/getDate
+// in any local timezone (the table at #raises-table-body and the projector's
+// `r.date > cutoff` comparisons both rely on local-component reads).
+test('RAISES dates are TZ-stable', () => {
+  const expected = [
+    [2025, 6, 1],
+    [2026, 6, 1],
+    [2027, 6, 1],
+    [2028, 6, 1],
+  ];
+  assert.equal(RAISES.length, expected.length);
+  for (let i = 0; i < expected.length; i++) {
+    const [y, m, d] = expected[i];
+    assert.equal(RAISES[i].date.getFullYear(), y, `RAISES[${i}] year`);
+    assert.equal(RAISES[i].date.getMonth(),    m, `RAISES[${i}] month`);
+    assert.equal(RAISES[i].date.getDate(),     d, `RAISES[${i}] day`);
+  }
+});
 
 test('buildPaystubStream', async (t) => {
   await t.test('empty input returns []', () => {
