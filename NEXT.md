@@ -1,8 +1,3 @@
-# raises
-Would updating the paystub-scanning code to verify that past raises are applied to regular pay when and as expected provide a meaningful guard against regressions, or are the existing tests sufficient for that?
-
-For plans which use 'total' earnings, the UI for letting someone manually input all of the related values seems too complex to bother with, which is why we've implemented the raise-projection only when scanning actual paystubs. For plans which only use 'regular' pay to computer their AFC, it seems like we can accurately extrapolate their future windows by just multiplying the AFC vs the applicable raise amounts on a date-wise basis. If that's true, can we go ahead and add raise-extrapolation and graphing for regular-only plans?
-
 # fixing COLA
 When the graph starts showing a straight line because the employee has retired, the
 COLA curve now also has that fixed starting point, so it should change from 'display on hover' to 'always display', with that fixed starting point

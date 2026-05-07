@@ -748,6 +748,9 @@
       lastWindows = windows;
       window._debug.lastPaystubStream = buildPaystubStream(stubs);
 
+      const stream = window._debug.lastPaystubStream;
+      if (stream.length) renderRaisesTable(stream[stream.length - 1].month);
+
       const first = stubs[0];
       const last  = stubs[stubs.length - 1];
       const stubLabel = `${stubs.length} stub${stubs.length !== 1 ? 's' : ''}`;
@@ -1553,6 +1556,7 @@
       lastWindows     = [];
       cancelRequested = false;
       window._debug.lastPaystubStream = [];
+      renderRaisesTable();
       clearCache();
       cacheToggleEl.checked = false;
       cacheMode             = false;
