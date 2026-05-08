@@ -377,7 +377,7 @@
 </head>
 <body>
   <h1>Estimated Pension Graph</h1>
-  <p class="disclaimer-banner">This graph is based on the formulas and logic from published documents, but is completely unauthorized; for authorized estimates, use the official calculator (and for firm numbers, retire and see what happens).</p>
+  <p class="disclaimer-banner"></p>
   <div id="url-error-banner" class="url-error-banner" hidden>
     <strong>Issues:</strong>
     <ul></ul>
@@ -624,7 +624,7 @@
   <svg id="vac-chart-svg"></svg>
   <div id="vac-separated-message" hidden></div>
 
-  <p class="disclaimer-banner">This graph is based on the formulas and logic from published documents, but is completely unauthorized; for authorized estimates, use the official calculator (and for firm numbers, retire and see what happens).</p>
+  <p class="disclaimer-banner"></p>
   <p id="reload-bar-bottom" class="reload-bar"><a id="reload-link-bottom" href="#">Reload</a></p>
 
   <script src="lib/d3-7.9.0.min.js"></script>
@@ -632,6 +632,9 @@
   <script src="lib/pension.js"></script>
   <script type="module">
     pdfjsLib.GlobalWorkerOptions.workerSrc = './lib/pdfjs-worker-3.11.174.min.js';
+
+    const DISCLAIMER_TEXT = 'These graphs are based on the formulas and logic from published documents, but are completely unauthorized; for authorized estimates, use the official calculator (and for firm numbers, retire and see what happens).';
+    document.querySelectorAll('.disclaimer-banner').forEach(el => { el.textContent = DISCLAIMER_TEXT; });
 
     const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
