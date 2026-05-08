@@ -1,16 +1,24 @@
-# vacationing
-Although I'm having trouble finding authoritative documentation, I've been told that,
-upon retirement, any unused vacation up to a maximum of 90 days (720 hours) will be
-converted into a payout for the retiree using the simple formula
-payout = Hourly Rate at Retirement * Unused Vacation Hours
+# vac
+Rewrite the disclaimer as a single string constant used twice, then 
+change it to apply to plural graphs.
 
-Since I'm already scanning the paystubs, the code contains logic for applying
-expected raises to regular base pay, I'd like to duplicate the current fields
-for inputting sick leave (number of hours, as of, additional hours-per-month) for
-vacation hours, and add an extra field to this new set for 'current hourly rate'
-as of the same date; and then add a line to the graph showing how much their
-current and maximum-with-no-spending vacation time would be worth upon retirement.
+X-axis max date should either be last day of service, if one was selected;
+or Dec 31 of the year the user reaches the max possible accumulated value,
+which happens iff they have 720 hours on Jan 1 of a calendar year and
+accumulate without spending for that entire year... and if that interval
+is greater than say 5 years, maybe we should collapse the intervening
+dates until we reach that absolute max?
 
+# insecurity
+Having all the field values as urlParams was very helpful during initial
+development when I was constantly reloading the page; and is still useful
+during manual testing. It does present a minor security hole, though, since
+whoever sees the url will see your DOB and some financial info. Would it
+be possible to change the code so that one *can* use urlParams to init
+any or all of the form fields, *but* the URL after that point will remain
+unchanged?  And the reload links would also need to mirror only whatever
+params were in the initial URL, rather than updating to track changes in the
+form state. Sound good?
 
 # fixing COLA
 When the graph starts showing a straight line because the employee has retired, the

@@ -5,6 +5,8 @@ const {
   buildPaystubStream,
   buildSyntheticStream,
   projectAfcAtRetirement,
+  vacationPayoutAt,
+  buildVacationSeries,
   applyRaises,
   blendedBenefit,
   calculateSeries,
@@ -13,8 +15,11 @@ const {
   primaryArfAge,
   primaryEligibility,
   primaryARF,
+  addMonths,
+  monthsBetween,
   PLAN_CONFIGS,
   RAISES,
+  VACATION_CAP_HOURS,
   todayInHST,
 } = require('../lib/pension.js');
 
@@ -354,6 +359,158 @@ test('projectAfcAtRetirement', async (t) => {
   });
 });
 
+// ── vacationPayoutAt ──────────────────────────────────────────────────
+test('vacationPayoutAt', async (t) => {
+  await t.test('1. linear accrual sanity: 12 months at 14 hrs/mo from 0 → 168 hrs', () => {
+    const r = vacationPayoutAt(new Date(2026, 0, 1), {
+      vacHoursAsOf: 0,
+      vacAsOfDate:  new Date(2025, 0, 1),
+      accrualHrsPerMo: 14,
+      hourlyRateAtAsOf: 1,
+      raises: [],
+    });
+    assert.equal(r.currentPayout, 0);
+    assert.equal(r.maxPayout, 168);
+    assert.equal(r.projectedHourlyRate, 1);
+  });
+
+  await t.test('2. 720 cap at as-of date when vacHoursAsOf > 720', () => {
+    const r = vacationPayoutAt(new Date(2025, 1, 1), {
+      vacHoursAsOf: 800,
+      vacAsOfDate:  new Date(2025, 0, 1),
+      accrualHrsPerMo: 14,
+      hourlyRateAtAsOf: 10,
+      raises: [],
+    });
+    // Cap clamps both curves to 720 even though raw hours would be 800 / 814.
+    assert.equal(r.currentPayout, VACATION_CAP_HOURS * 10);
+    assert.equal(r.maxPayout,    VACATION_CAP_HOURS * 10);
+  });
+
+  await t.test('3. 720 cap applied mid-projection on max-no-spend curve', () => {
+    // 400 + 14×60 = 1240 → clamped to 720
+    const r = vacationPayoutAt(new Date(2030, 0, 1), {
+      vacHoursAsOf: 400,
+      vacAsOfDate:  new Date(2025, 0, 1),
+      accrualHrsPerMo: 14,
+      hourlyRateAtAsOf: 1,
+      raises: [],
+    });
+    assert.equal(r.currentPayout, 400);
+    assert.equal(r.maxPayout, 720);
+  });
+
+  await t.test('4. hourly rate compounds across multiple future raises', () => {
+    const r = vacationPayoutAt(new Date(2030, 0, 1), {
+      vacHoursAsOf: 100,
+      vacAsOfDate:  new Date(2025, 0, 1),
+      accrualHrsPerMo: 0,
+      hourlyRateAtAsOf: 45,
+      raises: [
+        { date: new Date(2025, 6, 1), rate: 0.035  },
+        { date: new Date(2026, 6, 1), rate: 0.0379 },
+        { date: new Date(2027, 6, 1), rate: 0.04   },
+        { date: new Date(2028, 6, 1), rate: 0.04   },
+      ],
+    });
+    const expected = 45 * 1.035 * 1.0379 * 1.04 * 1.04;
+    assert.ok(Math.abs(r.projectedHourlyRate - expected) < 1e-9,
+      `projectedHourlyRate=${r.projectedHourlyRate} expected=${expected}`);
+    assert.ok(Math.abs(r.currentPayout - 100 * expected) < 1e-9);
+  });
+
+  await t.test('5. past raises (date ≤ vacAsOfDate) filtered out', () => {
+    // First raise is at the as-of date — strict `>` excludes it. Second
+    // raise is after, so it applies.
+    const r = vacationPayoutAt(new Date(2027, 0, 1), {
+      vacHoursAsOf: 100,
+      vacAsOfDate:  new Date(2025, 6, 1),
+      accrualHrsPerMo: 0,
+      hourlyRateAtAsOf: 45,
+      raises: [
+        { date: new Date(2025, 6, 1), rate: 0.035  },  // == asOf → skipped
+        { date: new Date(2024, 6, 1), rate: 0.10   },  // < asOf  → skipped
+        { date: new Date(2026, 6, 1), rate: 0.0379 },  // > asOf  → applies
+      ],
+    });
+    const expected = 45 * 1.0379;
+    assert.ok(Math.abs(r.projectedHourlyRate - expected) < 1e-9,
+      `projectedHourlyRate=${r.projectedHourlyRate} expected=${expected}`);
+  });
+
+  await t.test('6. raise after retDate not applied', () => {
+    const r = vacationPayoutAt(new Date(2026, 0, 1), {
+      vacHoursAsOf: 100,
+      vacAsOfDate:  new Date(2025, 0, 1),
+      accrualHrsPerMo: 0,
+      hourlyRateAtAsOf: 45,
+      raises: [
+        { date: new Date(2025, 6, 1), rate: 0.035  },  // applies
+        { date: new Date(2026, 6, 1), rate: 0.0379 },  // > retDate → skipped
+      ],
+    });
+    const expected = 45 * 1.035;
+    assert.ok(Math.abs(r.projectedHourlyRate - expected) < 1e-9);
+  });
+
+  await t.test('7. retDate before asOf → no negative accrual; max == current', () => {
+    const r = vacationPayoutAt(new Date(2025, 6, 1), {
+      vacHoursAsOf: 400,
+      vacAsOfDate:  new Date(2026, 0, 1),
+      accrualHrsPerMo: 14,
+      hourlyRateAtAsOf: 45,
+      raises: [],
+    });
+    assert.equal(r.currentPayout, 400 * 45);
+    assert.equal(r.maxPayout,    400 * 45);  // accrual clamped to 0
+  });
+
+  await t.test('8. zero hourly rate → all payouts zero', () => {
+    const r = vacationPayoutAt(new Date(2030, 0, 1), {
+      vacHoursAsOf: 400,
+      vacAsOfDate:  new Date(2025, 0, 1),
+      accrualHrsPerMo: 14,
+      hourlyRateAtAsOf: 0,
+      raises: [{ date: new Date(2026, 0, 1), rate: 0.05 }],
+    });
+    assert.equal(r.currentPayout, 0);
+    assert.equal(r.maxPayout, 0);
+    assert.equal(r.projectedHourlyRate, 0);
+  });
+
+  await t.test('9. zero starting hours but non-zero accrual → max grows from current=0', () => {
+    const r = vacationPayoutAt(new Date(2026, 0, 1), {
+      vacHoursAsOf: 0,
+      vacAsOfDate:  new Date(2025, 0, 1),
+      accrualHrsPerMo: 14,
+      hourlyRateAtAsOf: 50,
+      raises: [],
+    });
+    assert.equal(r.currentPayout, 0);
+    assert.equal(r.maxPayout, 168 * 50);
+  });
+
+  await t.test('10. cutoff caps both accrual and raises at min(cutoff, retDate)', () => {
+    // retDate is 5 years out; cutoff is 1 year out. Accrual runs for 12 mo,
+    // and only the 2025-07-01 raise applies (the 2026-07-01 raise is past cutoff).
+    const r = vacationPayoutAt(new Date(2030, 0, 1), {
+      vacHoursAsOf: 0,
+      vacAsOfDate:  new Date(2025, 0, 1),
+      accrualHrsPerMo: 14,
+      hourlyRateAtAsOf: 45,
+      raises: [
+        { date: new Date(2025, 6, 1), rate: 0.035  },
+        { date: new Date(2026, 6, 1), rate: 0.0379 },
+      ],
+      cutoff: new Date(2026, 0, 1),
+    });
+    const expectedRate = 45 * 1.035;
+    assert.ok(Math.abs(r.projectedHourlyRate - expectedRate) < 1e-9,
+      `projectedHourlyRate=${r.projectedHourlyRate} expected=${expectedRate}`);
+    assert.equal(r.maxPayout, 168 * expectedRate);
+  });
+});
+
 // ── calculateSeries (Stage 4 wiring) ──────────────────────────────────
 const nextMonthStart = () => {
   const t = new Date();
@@ -535,5 +692,149 @@ test('calculateSeries: paystubStream wiring', async (t) => {
     const farFuture = series.find(r => r.retDate >= new Date(2035, 0, 1) && r.primaryPension != null);
     assert.ok(farFuture, 'expected an eligible far-future row');
     assert.equal(farFuture.pensionWithRaises, null);
+  });
+
+  await t.test('8. calculateSeries no longer carries vacation fields', () => {
+    // Vacation moved to buildVacationSeries; pension rows shouldn't surface
+    // those keys at all.
+    const series = calculateSeries(baseInputs());
+    assert.ok(series.length > 0);
+    assert.equal('vacationCurrentPayout' in series[0], false);
+    assert.equal('vacationMaxPayout' in series[0], false);
+  });
+});
+
+// ── buildVacationSeries ──────────────────────────────────────────────
+test('buildVacationSeries', async (t) => {
+  const today = todayInHST();
+  const startMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+  await t.test('1. active member, no LDOS → today → today+24mo, monthly rows', () => {
+    const result = buildVacationSeries({
+      vacHours: 400,
+      vacAsOf:  new Date(2025, 0, 1),
+      vacRate:  14,
+      vacHourlyRate: 45,
+      lastDayOfSvc: null,
+    });
+    assert.equal(result.separated, false);
+    assert.ok(result.rows.length > 0);
+    assert.equal(result.rows[0].retDate.getTime(), startMonth.getTime());
+    const lastRow = result.rows[result.rows.length - 1];
+    const expectedEnd = addMonths(startMonth, 24);
+    assert.equal(lastRow.retDate.getTime(), expectedEnd.getTime());
+    // Each row is one month apart
+    for (let i = 1; i < result.rows.length; i++) {
+      const gap = monthsBetween(result.rows[i - 1].retDate, result.rows[i].retDate);
+      assert.equal(gap, 1, `row ${i} is not one month after row ${i - 1}`);
+    }
+  });
+
+  await t.test('2. future LDOS within 2y → horizon still extends to today+24mo', () => {
+    const ldos = addMonths(startMonth, 12);  // 1 year out
+    const result = buildVacationSeries({
+      vacHours: 400,
+      vacAsOf:  new Date(2025, 0, 1),
+      vacHourlyRate: 45,
+      lastDayOfSvc: ldos,
+    });
+    assert.equal(result.separated, false);
+    const lastRow = result.rows[result.rows.length - 1];
+    const expectedEnd = addMonths(startMonth, 24);
+    assert.equal(lastRow.retDate.getTime(), expectedEnd.getTime(),
+      'LDOS within 2y should not shorten the horizon below today+2y');
+    assert.equal(result.lastDayOfSvc.getTime(), ldos.getTime());
+  });
+
+  await t.test('3. future LDOS beyond 2y → horizon stops exactly at LDOS month', () => {
+    const ldos = addMonths(startMonth, 60);  // 5 years out
+    const ldosMid = new Date(ldos.getFullYear(), ldos.getMonth(), 15);
+    const result = buildVacationSeries({
+      vacHours: 0,
+      vacAsOf:  new Date(2025, 0, 1),
+      vacHourlyRate: 45,
+      lastDayOfSvc: ldosMid,
+    });
+    assert.equal(result.separated, false);
+    const lastRow = result.rows[result.rows.length - 1];
+    const expectedEnd = new Date(ldos.getFullYear(), ldos.getMonth(), 1);
+    assert.equal(lastRow.retDate.getTime(), expectedEnd.getTime(),
+      'LDOS > 2y out should cap horizon at LDOS month');
+  });
+
+  await t.test('4. already separated → short-circuit summary, no rows', () => {
+    const ldos = new Date(2024, 5, 15);  // past
+    const result = buildVacationSeries({
+      vacHours: 600,
+      vacAsOf:  new Date(2024, 0, 1),
+      vacRate:  14,
+      vacHourlyRate: 45,
+      lastDayOfSvc: ldos,
+    });
+    assert.equal(result.separated, true);
+    assert.equal(result.separatedOn.getTime(), ldos.getTime());
+    assert.equal('rows' in result, false);
+    // 600 + 14*5 = 670 (under cap); rate untouched (no raises in window)
+    assert.equal(result.finalHours, 670);
+    assert.ok(result.finalPayout > 0);
+    assert.ok(result.finalRate > 0);
+  });
+
+  await t.test('5. already separated, hours over cap → finalHours clamps to 720', () => {
+    const result = buildVacationSeries({
+      vacHours: 800,
+      vacAsOf:  new Date(2024, 0, 1),
+      vacRate:  14,
+      vacHourlyRate: 50,
+      lastDayOfSvc: new Date(2024, 6, 1),
+    });
+    assert.equal(result.separated, true);
+    assert.equal(result.finalHours, VACATION_CAP_HOURS);
+    assert.equal(result.finalPayout, VACATION_CAP_HOURS * result.finalRate);
+  });
+
+  await t.test('6. raisesNA: true suppresses raise compounding on hourly rate', () => {
+    // Pick LDOS far enough out that at least one RAISES entry would land
+    // within the projection horizon when raises are enabled. Skip if no
+    // future raises remain (test stability across calendar drift).
+    const futureRaises = RAISES.filter(r => r.date > today);
+    if (!futureRaises.length) return;
+    const lastRaise = futureRaises[futureRaises.length - 1];
+    const horizonEnd = new Date(lastRaise.date.getFullYear() + 1, lastRaise.date.getMonth(), 1);
+
+    const withRaises = buildVacationSeries({
+      vacHours: 0,
+      vacAsOf:  new Date(today.getFullYear() - 1, today.getMonth(), 1),
+      vacHourlyRate: 45,
+      lastDayOfSvc: horizonEnd,
+      raisesNA: false,
+    });
+    const withoutRaises = buildVacationSeries({
+      vacHours: 0,
+      vacAsOf:  new Date(today.getFullYear() - 1, today.getMonth(), 1),
+      vacHourlyRate: 45,
+      lastDayOfSvc: horizonEnd,
+      raisesNA: true,
+    });
+    // Compare the last common row; with raises should be strictly higher.
+    const withLast    = withRaises.rows[withRaises.rows.length - 1];
+    const withoutLast = withoutRaises.rows[withoutRaises.rows.length - 1];
+    assert.equal(withLast.retDate.getTime(), withoutLast.retDate.getTime());
+    assert.ok(withLast.maxPayout > withoutLast.maxPayout,
+      `raises should lift maxPayout: with=${withLast.maxPayout} without=${withoutLast.maxPayout}`);
+  });
+
+  await t.test('7. vacHours = 0 produces a valid (flat-current, ramping-max) series', () => {
+    const result = buildVacationSeries({
+      vacHours: 0,
+      vacAsOf:  new Date(today.getFullYear() - 1, today.getMonth(), 1),
+      vacRate:  14,
+      vacHourlyRate: 45,
+      lastDayOfSvc: null,
+    });
+    assert.equal(result.separated, false);
+    assert.ok(result.rows.length > 0);
+    for (const row of result.rows) assert.equal(row.currentPayout, 0);
+    assert.ok(result.rows[result.rows.length - 1].maxPayout > result.rows[0].maxPayout);
   });
 });

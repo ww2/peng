@@ -87,6 +87,14 @@
       align-items: end;
       justify-content: start;
     }
+    .vac-grid {
+      display: grid;
+      grid-template-columns: auto auto auto auto;
+      column-gap: 1rem;
+      row-gap: 0.15rem;
+      align-items: end;
+      justify-content: start;
+    }
     .svc-pair-row {
       display: flex;
       gap: 2rem;
@@ -133,11 +141,13 @@
     input[type="number"][readonly] { pointer-events: none; user-select: none; }
     .svc-grid > label, .svc-grid > .svc-hdr,
     .sl-grid  > label, .sl-grid  > .svc-hdr,
+    .vac-grid > label, .vac-grid > .svc-hdr,
     .svc-pair > label, .svc-pair > .svc-hdr {
       font-size: 0.8rem; color: #555; align-self: end;
     }
     .svc-grid input[type="date"], .svc-grid input[type="number"],
     .sl-grid  input[type="date"], .sl-grid  input[type="number"],
+    .vac-grid input[type="date"], .vac-grid input[type="number"],
     .svc-pair input[type="date"], .svc-pair input[type="number"] {
       font-family: monospace; font-size: 0.9rem; padding: 0.25rem; width: 100%;
     }
@@ -222,14 +232,15 @@
     .details-body { margin-top: 0.4rem; }
 
     /* ── Action row ── */
-    #action-row {
+    #action-row, #vac-action-row {
       display: flex;
       align-items: baseline;
       gap: 1rem;
       margin-bottom: 1.25rem;
     }
+    #vac-action-row { margin-top: 0.5rem; }
 
-    #graph-btn, #clear-btn, #picker-btn, #cancel-btn {
+    #graph-btn, #clear-btn, #picker-btn, #cancel-btn, #vac-graph-btn {
       font-family: monospace;
       font-size: 0.95rem;
       padding: 0.35rem 1rem;
@@ -251,8 +262,21 @@
     .url-error-banner ul { margin: 0.25rem 0 0 1.25rem; padding: 0; }
     .url-error-banner li { margin: 0.1rem 0; }
 
-    #status-line { font-size: 0.85rem; color: #c00; }
-    #status-line:empty { display: none; }
+    #status-line, #vac-status-line { font-size: 0.85rem; color: #c00; }
+    #status-line:empty, #vac-status-line:empty { display: none; }
+
+    /* Already-separated message replaces the vacation chart entirely. */
+    #vac-separated-message {
+      font-size: 0.95rem;
+      padding: 0.6rem 0.75rem;
+      border: 1px solid #ddd;
+      background: #fafafa;
+      border-radius: 3px;
+      margin-top: 0.4rem;
+    }
+    #vac-separated-message[hidden] { display: none; }
+    #vac-separated-message .sep-line { display: block; }
+    #vac-separated-message .sep-payout { margin-top: 0.2rem; }
 
     /* ── Chart legend ── */
     #chart-legend {
@@ -274,6 +298,16 @@
       border: 1px solid #ddd;
       background: #fafafa;
     }
+    /* Vacation chart sits below the pension chart and hides until vacation data is present */
+    #vac-chart-svg {
+      display: none;
+      width: 100%;
+      height: 320px;
+      border: 1px solid #ddd;
+      background: #fafafa;
+      margin-top: 0.4rem;
+    }
+    #vac-chart-svg.has-data { display: block; }
 
     /* ── Series table ── */
     #series-details { margin: 0.6rem 0; }
@@ -551,6 +585,45 @@
     <summary>Estimation table</summary>
     <div id="series-table"></div>
   </details>
+
+  <!-- ── Vacation section (independent of pension calculation) ─ -->
+  <fieldset id="group-vacation-input">
+    <legend>Vacation payout</legend>
+    <div class="form-rows">
+
+      <div class="form-row form-row--subgrid">
+        <span class="form-label">Vacation</span>
+        <div class="vac-grid">
+          <label for="vac-hours">Unused hours</label>
+          <label for="vac-as-of">As of</label>
+          <label for="vac-rate">Accruing (hrs/mo)</label>
+          <label for="vac-hourly-rate">Hourly rate ($/hr)</label>
+
+          <input type="number" id="vac-hours" min="0" step="1" placeholder="0" style="width:12ch">
+          <input type="date" id="vac-as-of">
+          <input type="number" id="vac-rate" min="0" step="0.5" value="14" class="no-spin" style="width:6ch">
+          <input type="number" id="vac-hourly-rate" min="0" step="0.01" placeholder="$/hr" style="width:8ch">
+        </div>
+      </div>
+
+      <div class="form-row" style="margin-bottom:0.25rem;">
+        <label style="font-size:0.8rem; display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
+          <input type="checkbox" id="vac-raises-na"> <span>Projected raises do not apply</span>
+        </label>
+      </div>
+
+    </div>
+  </fieldset>
+
+  <div id="vac-action-row">
+    <button id="vac-graph-btn" type="button" disabled>Generate vacation graph</button>
+    <span id="vac-status-line"></span>
+  </div>
+
+  <!-- Vacation-payout chart, hidden until inputs are complete -->
+  <svg id="vac-chart-svg"></svg>
+  <div id="vac-separated-message" hidden></div>
+
   <p class="disclaimer-banner">This graph is based on the formulas and logic from published documents, but is completely unauthorized; for authorized estimates, use the official calculator (and for firm numbers, retire and see what happens).</p>
   <p id="reload-bar-bottom" class="reload-bar"><a id="reload-link-bottom" href="#">Reload</a></p>
 
@@ -578,6 +651,9 @@
       colorRaises           : '#7700cc',
       colorRaisesSLCurrent  : '#aa33dd',
       colorRaisesSLProjected: '#cc88ee',
+      // Vacation curve colors (orange family — distinct from blue/purple/green)
+      colorVacationCurrent: '#cc4400',
+      colorVacationMax    : '#ee8833',
       colorTitle     : '#222',
       colorCrosshair : '#aaa',
     };
@@ -643,6 +719,14 @@
     const slHoursEl         = document.getElementById('sl-hours');
     const slAsOfEl          = document.getElementById('sl-as-of');
     const slRateEl          = document.getElementById('sl-rate');
+    const vacHoursEl        = document.getElementById('vac-hours');
+    const vacAsOfEl         = document.getElementById('vac-as-of');
+    const vacRateEl         = document.getElementById('vac-rate');
+    const vacHourlyRateEl   = document.getElementById('vac-hourly-rate');
+    const vacRaisesNaEl     = document.getElementById('vac-raises-na');
+    const vacGraphBtn       = document.getElementById('vac-graph-btn');
+    const vacStatusLine     = document.getElementById('vac-status-line');
+    const vacSeparatedMsgEl = document.getElementById('vac-separated-message');
     const debugDetails     = document.getElementById('debug-details');
     const debugBody        = document.getElementById('debug-body');
     const debugPanelEl     = document.getElementById('debug-panel');
@@ -1408,6 +1492,97 @@
       else { drawChart(); drawSeriesTable(null); }
     }
 
+    // ── Vacation gate / runner ──────────────────────────────────
+    // Independent of pension. Auto-fires whenever vacation inputs are
+    // complete + the shared lastDay/stillActive state is resolved.
+    // vacHours can legitimately be 0 (gate uses `value !== ''` rather than
+    // `> 0`); vacRate has a default of 14 and isn't part of the trigger.
+    function canCalculateVacation() {
+      const dateOk = stillActiveEl.checked || !!lastDayEl.value;
+      const hoursFilled = vacHoursEl.value !== '' && parseFloat(vacHoursEl.value) >= 0;
+      const asOfOk      = !!vacAsOfEl.value;
+      const rateOk      = parseFloat(vacHourlyRateEl.value) > 0;
+      return dateOk && hoursFilled && asOfOk && rateOk;
+    }
+
+    function runVacationCalculate() {
+      const lastDayOfSvc = stillActiveEl.checked ? null : parseIsoDate(lastDayEl.value);
+      const result = buildVacationSeries({
+        vacHours:      parseFloat(vacHoursEl.value),
+        vacAsOf:       parseIsoDate(vacAsOfEl.value),
+        vacRate:       parseFloat(vacRateEl.value) || 14,
+        vacHourlyRate: parseFloat(vacHourlyRateEl.value),
+        lastDayOfSvc,
+        raisesNA:      vacRaisesNaEl.checked,
+      });
+      window._debug.lastVacationResult = result;
+      drawVacationChart(result);
+    }
+
+    function maybeCalculateVacation() {
+      const ok = canCalculateVacation();
+      vacGraphBtn.disabled = !ok;
+      if (ok) runVacationCalculate();
+      else drawVacationChart(null);
+    }
+
+    // Bidirectional sync between the pension-side and vacation-side
+    // "Projected raises do not apply" checkboxes. Setting one programmatically
+    // dispatches a 'change' event on the other so the rest of each side's
+    // existing change handlers (visibility toggle, pension recalculate,
+    // updateReloadLink, etc.) fire on both as if the user had clicked them.
+    // The recursion guard prevents the dispatched event from re-entering.
+    let raisesNaSyncing = false;
+    function syncRaisesNaFrom(source) {
+      if (raisesNaSyncing) return;
+      raisesNaSyncing = true;
+      const target = source === raisesNaEl ? vacRaisesNaEl : raisesNaEl;
+      if (target.checked !== source.checked) {
+        target.checked = source.checked;
+        target.dispatchEvent(new Event('change'));
+      }
+      raisesNaSyncing = false;
+    }
+    // Pension-side click: sync to vac (which auto-fires the vac chart via the
+    // dispatched change event). Pension-side recalc happens via the existing
+    // raisesNaEl 'change' listener registered later.
+    raisesNaEl.addEventListener('change', () => syncRaisesNaFrom(raisesNaEl));
+    // Vac-side click: sync to pension (firing pension recalc via dispatched
+    // change), then run own-side vacation recalc.
+    vacRaisesNaEl.addEventListener('change', () => {
+      syncRaisesNaFrom(vacRaisesNaEl);
+      maybeCalculateVacation();
+    });
+
+    // Auto-fire vacation chart on changes to its inputs and to the shared
+    // lastDay/stillActive controls.
+    [vacHoursEl, vacAsOfEl, vacRateEl, vacHourlyRateEl].forEach(el =>
+      el.addEventListener('input', maybeCalculateVacation)
+    );
+    stillActiveEl.addEventListener('change', maybeCalculateVacation);
+    lastDayEl.addEventListener('input', maybeCalculateVacation);
+
+    vacGraphBtn.addEventListener('click', () => {
+      const errors = [];
+      function mark(el) {
+        el.classList.add('input-error');
+        const clear = () => {
+          el.classList.remove('input-error');
+          el.removeEventListener('input',  clear);
+          el.removeEventListener('change', clear);
+        };
+        el.addEventListener('input',  clear);
+        el.addEventListener('change', clear);
+        errors.push(el);
+      }
+      if (vacHoursEl.value === '' || !(parseFloat(vacHoursEl.value) >= 0)) mark(vacHoursEl);
+      if (!vacAsOfEl.value)                                                mark(vacAsOfEl);
+      if (!(parseFloat(vacHourlyRateEl.value) > 0))                        mark(vacHourlyRateEl);
+      if (!stillActiveEl.checked && !lastDayEl.value)                      mark(lastDayEl);
+      if (errors.length) return;
+      runVacationCalculate();
+    });
+
     // Total credited service is the sum of the Hybrid and Noncontributory
     // pairs (PLAN.md Stage 1). Months carry: any sum ≥ 12 rolls one year up.
     // Each months input is bounded 0..11 by its `min`/`max` attrs. Zero
@@ -1550,13 +1725,14 @@
 
     function runClear() {
       // Form inputs
-      [planEl, dobEl, memDateEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, slAsOfEl]
+      [planEl, dobEl, memDateEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, slAsOfEl, vacHoursEl, vacAsOfEl, vacHourlyRateEl]
         .forEach(el => { el.value = ''; });
       stillActiveEl.checked = true;
       syncLastDayState();
       syncSvcSplitVisibility();
       updateManualAfcNote();
       slRateEl.value = '14';
+      vacRateEl.value = '14';
 
       // PDF picker state
       pdfFiles        = {};
@@ -1593,12 +1769,19 @@
       memDateEl.classList.remove('input-error');
       setMemDateBannerEntry(null);
 
+      // Vacation section
+      raisesNaEl.checked    = false;
+      vacRaisesNaEl.checked = false;
+      vacGraphBtn.disabled  = true;
+      vacStatusLine.textContent = '';
+
       updateReloadLink();
       // Strip URL params now that the form is empty and cache toggle is off —
       // mirrors the cache-toggle handler's replaceState pattern.
       history.replaceState(null, '', buildReloadUrl());
       drawChart();
       drawSeriesTable(null);
+      drawVacationChart(null);
     }
 
     clearBtn.addEventListener('click', runClear);
@@ -1718,21 +1901,30 @@
     const RAISES_NA_BASE_LABEL = 'Projected raises do not apply';
     const RAISES_NA_LASTDAY_SUFFIX = ' due to the Last day of service above';
     function applyRaisesNALock(forced) {
+      let changed = false;
       if (forced && raisesNaEl.dataset.forced !== '1') {
         raisesNaEl.dataset.prior  = raisesNaEl.checked ? '1' : '0';
         raisesNaEl.dataset.forced = '1';
         raisesNaEl.checked        = true;
         raisesNaEl.disabled       = true;
+        vacRaisesNaEl.checked     = true;
+        vacRaisesNaEl.disabled    = true;
         raisesNaTextEl.textContent = RAISES_NA_BASE_LABEL + RAISES_NA_LASTDAY_SUFFIX;
         raisesTableRowEl.hidden   = true;
+        changed = true;
       } else if (!forced && raisesNaEl.dataset.forced === '1') {
-        raisesNaEl.checked        = raisesNaEl.dataset.prior === '1';
+        const prior = raisesNaEl.dataset.prior === '1';
+        raisesNaEl.checked        = prior;
         raisesNaEl.disabled       = false;
+        vacRaisesNaEl.checked     = prior;
+        vacRaisesNaEl.disabled    = false;
         raisesNaTextEl.textContent = RAISES_NA_BASE_LABEL;
         raisesTableRowEl.hidden   = raisesNaEl.checked;
         delete raisesNaEl.dataset.forced;
         delete raisesNaEl.dataset.prior;
+        changed = true;
       }
+      if (changed) maybeCalculateVacation();
     }
 
     // Show the contractual-adjustments fieldset only when a paystub stream
@@ -1835,6 +2027,10 @@
       add('slHours',    slHoursEl);
       add('slAsOf',     slAsOfEl);
       if (slRateEl.value && slRateEl.value !== '14') add('slRate', slRateEl);
+      add('vacHours',       vacHoursEl);
+      add('vacAsOf',        vacAsOfEl);
+      if (vacRateEl.value && vacRateEl.value !== '14') add('vacRate', vacRateEl);
+      add('vacHourlyRate',  vacHourlyRateEl);
       if (cacheMode) params.set('cache', '');
       // Strip `=` from presence-only flags so the URL reads `?cache` not `?cache=`.
       const qs = params.toString().replace(/=(?=&|$)/g, '');
@@ -1847,7 +2043,7 @@
       reloadLinkBottom.href = url + '#reload-bar-bottom';
     }
 
-    [dobEl, memDateEl, svcYearsEl, svcMonthsEl, hybridSvcYearsEl, hybridSvcMonthsEl, ncSvcYearsEl, ncSvcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl].forEach(el =>
+    [dobEl, memDateEl, svcYearsEl, svcMonthsEl, hybridSvcYearsEl, hybridSvcMonthsEl, ncSvcYearsEl, ncSvcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl, vacHoursEl, vacAsOfEl, vacRateEl, vacHourlyRateEl].forEach(el =>
       el.addEventListener('input', updateReloadLink)
     );
     stillActiveEl.addEventListener('change', updateReloadLink);
@@ -1870,13 +2066,13 @@
     manualAfcEl.addEventListener('input',   commitAfc);
 
     // ── URL parameter pre-fill ────────────────────────────────────
-    // Supported params: plan, dob, memDate, svcYears, svcMonths, ncSvcYears, ncSvcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate, cache
+    // Supported params: plan, dob, memDate, svcYears, svcMonths, ncSvcYears, ncSvcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate, vacHours, vacAsOf, vacRate, vacHourlyRate, cache
     // svcAsOf is the reference date for the entered credited service. lastDay (if set) implies
     // the user is separated or has a planned retirement date; "Still active" is unchecked.
     // Example: ?plan=hybrid&dob=1975-06-15&memDate=2014-08-01&svcYears=15&svcMonths=3&afc=4500
     // Bad values are surfaced in the URL-error banner; good values still pre-fill.
     {
-      const SUPPORTED_PARAMS = ['plan','dob','memDate','svcYears','svcMonths','ncSvcYears','ncSvcMonths','svcAsOf','lastDay','afc','slHours','slAsOf','slRate','cache'];
+      const SUPPORTED_PARAMS = ['plan','dob','memDate','svcYears','svcMonths','ncSvcYears','ncSvcMonths','svcAsOf','lastDay','afc','slHours','slAsOf','slRate','vacHours','vacAsOf','vacRate','vacHourlyRate','cache'];
       const PLAN_VALUES = ['hybrid','contributory','noncontributory'];
       const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
       const banner = urlErrorBanner;
@@ -1927,6 +2123,7 @@
         ['svcAsOf', svcAsOfEl],
         ['lastDay', lastDayEl],
         ['slAsOf',  slAsOfEl],
+        ['vacAsOf', vacAsOfEl],
       ];
       for (const [key, el] of dateFields) {
         if (!p.has(key) || p.get(key) === '') continue;
@@ -1952,9 +2149,12 @@
 
       // Numeric fields (positive)
       const numFields = [
-        ['afc',     manualAfcEl, false],  // strictly > 0
-        ['slHours', slHoursEl,   true],   // ≥ 0
-        ['slRate',  slRateEl,    false],  // strictly > 0
+        ['afc',           manualAfcEl,     false],  // strictly > 0
+        ['slHours',       slHoursEl,       true],   // ≥ 0
+        ['slRate',        slRateEl,        false],  // strictly > 0
+        ['vacHours',      vacHoursEl,      true],   // ≥ 0
+        ['vacRate',       vacRateEl,       false],  // strictly > 0
+        ['vacHourlyRate', vacHourlyRateEl, false],  // strictly > 0
       ];
       for (const [key, el, allowZero] of numFields) {
         if (!p.has(key) || p.get(key) === '') continue;
@@ -2033,23 +2233,16 @@
       const ok = canCalculate();
       graphBtn.disabled = !ok;
       if (ok) requestAnimationFrame(runCalculate);
+      const vacOk = canCalculateVacation();
+      vacGraphBtn.disabled = !vacOk;
+      if (vacOk) requestAnimationFrame(runVacationCalculate);
     }
-    // ── Chart ────────────────────────────────────────────────────
-    function drawChart(series = null, { hasSL = false, isSeparated = false, showRaises = false } = {}) {
-      const svg = d3.select('#chart-svg');
-      const W   = svg.node().clientWidth;
-      const H   = svg.node().clientHeight;
-
-      const margin = { top: 24, right: 20, bottom: 125, left: 62 };
-      const iW = W - margin.left - margin.right;
-      const iH = H - margin.top  - margin.bottom;
-
-      svg.selectAll('*').remove();
-
-      const g = svg.append('g')
-        .attr('transform', `translate(${margin.left},${margin.top})`);
-
-      // ── Scales ─────────────────────────────────────────────────
+    // ── Shared x-scale builder ──────────────────────────────────
+    // Pension-chart x-scale only. Compressed-zone math (not-yet-vested
+    // and vested-but-not-eligible regions render at fixed pixel widths)
+    // and the eligible-zone time-domain. The vacation chart now uses a
+    // plain linear time scale and does not call this helper.
+    function buildChartXScale(series, iW) {
       const COMPRESS_PX = 56;
       const today = todayInHST();
       const fallbackXMin = new Date(today.getFullYear(), today.getMonth() + 1, 1);
@@ -2058,19 +2251,6 @@
       const xMin = series ? series[0].retDate                 : fallbackXMin;
       const xMax = series ? series[series.length - 1].retDate : fallbackXMax;
 
-      const eligible = series ? series.filter(d => d.primaryPension !== null) : [];
-      const yMin = eligible.length
-        ? Math.floor(Math.min(...eligible.flatMap(d =>
-            [d.primaryPension].filter(v => v != null)
-          )) / 1000) * 1000
-        : 0;
-      const yMax = eligible.length
-        ? Math.ceil(Math.max(...eligible.flatMap(d =>
-            [d.pensionCurrentSL, d.pensionProjectedSL, d.pensionRaisesCurrentSL, d.pensionRaisesProjectedSL, d.primaryPension, d.pensionWithRaises].filter(v => v != null)
-          )) / 1000) * 1000
-        : 5000;
-
-      // Build compressed segments for ineligible zones (not-vested, vested-but-ineligible)
       const compressedSegs = [];
       if (series && series.length) {
         const fv = series.find(d => d.isVested);
@@ -2113,6 +2293,38 @@
         return new Date(eligFromDate.getTime() + seg_t * eligSpan);
       };
 
+      return { COMPRESS_PX, xMin, xMax, compressedSegs, eligPxStart, eligPxWidth, eligFromDate, xScale };
+    }
+
+    // ── Chart ────────────────────────────────────────────────────
+    function drawChart(series = null, { hasSL = false, isSeparated = false, showRaises = false } = {}) {
+      const svg = d3.select('#chart-svg');
+      const W   = svg.node().clientWidth;
+      const H   = svg.node().clientHeight;
+
+      const margin = { top: 24, right: 20, bottom: 125, left: 62 };
+      const iW = W - margin.left - margin.right;
+      const iH = H - margin.top  - margin.bottom;
+
+      svg.selectAll('*').remove();
+
+      const g = svg.append('g')
+        .attr('transform', `translate(${margin.left},${margin.top})`);
+
+      // ── Scales ─────────────────────────────────────────────────
+      const { COMPRESS_PX, xMin, xMax, compressedSegs, eligPxStart, eligPxWidth, eligFromDate, xScale } = buildChartXScale(series, iW);
+
+      const eligible = series ? series.filter(d => d.primaryPension !== null) : [];
+      const yMin = eligible.length
+        ? Math.floor(Math.min(...eligible.flatMap(d =>
+            [d.primaryPension].filter(v => v != null)
+          )) / 1000) * 1000
+        : 0;
+      const yMax = eligible.length
+        ? Math.ceil(Math.max(...eligible.flatMap(d =>
+            [d.pensionCurrentSL, d.pensionProjectedSL, d.pensionRaisesCurrentSL, d.pensionRaisesProjectedSL, d.primaryPension, d.pensionWithRaises].filter(v => v != null)
+          )) / 1000) * 1000
+        : 5000;
       const yScale = d3.scaleLinear().domain([yMin, yMax]).range([iH, 0]);
 
       // ── Tick values (eligible zone only) ────────────────────────
@@ -2576,6 +2788,264 @@
           })
           .on('mouseleave', () => tip.attr('display', 'none'));
       }
+    }
+
+    // ── Vacation chart ──────────────────────────────────────────────
+    // Renders the standalone vacation-payout chart. Consumes the result
+    // shape returned by buildVacationSeries:
+    //   { separated: false, rows: [{ retDate, currentPayout, maxPayout }, ...], lastDayOfSvc }
+    //   { separated: true, separatedOn, finalHours, finalRate, finalPayout }
+    // Linear time x-axis (no compression / no eligibility shading), monthly
+    // staircase via d3.curveStepAfter. When `separated` is true, the chart
+    // is hidden and `#vac-separated-message` is shown in its place.
+    function drawVacationChart(result = null) {
+      const svg = d3.select('#vac-chart-svg');
+      svg.selectAll('*').remove();
+      const node = svg.node();
+
+      // Hide both the chart and the separated message by default.
+      node.classList.remove('has-data');
+      vacSeparatedMsgEl.hidden = true;
+      vacSeparatedMsgEl.innerHTML = '';
+
+      if (!result) return;
+
+      const fmtMoney = v => '$' + Math.round(v).toLocaleString('en-US');
+
+      if (result.separated) {
+        const d = result.separatedOn;
+        const dStr = `${MONTHS[d.getMonth()]} ${d.getDate()} ${d.getFullYear()}`;
+        const rateStr = `$${result.finalRate.toFixed(2)}/hr`;
+        vacSeparatedMsgEl.innerHTML =
+          `<span class="sep-line">Already separated on ${dStr}.</span>` +
+          `<span class="sep-line sep-payout">Vacation payout: ${fmtMoney(result.finalPayout)} ` +
+          `(${result.finalHours} hours × ${rateStr}).</span>`;
+        vacSeparatedMsgEl.hidden = false;
+        return;
+      }
+
+      const rows = result.rows;
+      if (!rows || !rows.length) return;
+      node.classList.add('has-data');
+
+      const W = node.clientWidth;
+      const H = node.clientHeight;
+      const margin = { top: 24, right: 20, bottom: 100, left: 62 };
+      const iW = W - margin.left - margin.right;
+      const iH = H - margin.top  - margin.bottom;
+      const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+      const xMin = rows[0].retDate;
+      const xMax = rows[rows.length - 1].retDate;
+      const xScale = d3.scaleTime().domain([xMin, xMax]).range([0, iW]);
+
+      const vacMax = Math.max(0, ...rows.map(r => r.maxPayout));
+      const yMax = Math.max(1000, Math.ceil(vacMax / 1000) * 1000);
+      const yScale = d3.scaleLinear().domain([0, yMax]).range([iH, 0]);
+
+      // ── X axis: yearly major ticks; quarterly minor ticks for short windows
+      const xMajorVals = [];
+      for (let yr = xMin.getFullYear(); yr <= xMax.getFullYear() + 1; yr++) {
+        const jan1 = new Date(yr, 0, 1);
+        if (jan1 >= xMin && jan1 <= xMax) xMajorVals.push(jan1);
+      }
+      const xMinorVals = [];
+      const yearSpan = (xMax - xMin) / (1000 * 60 * 60 * 24 * 365);
+      if (yearSpan <= 6) {
+        for (let yr = xMin.getFullYear(); yr <= xMax.getFullYear() + 1; yr++) {
+          for (const mo of [3, 6, 9]) {
+            const d = new Date(yr, mo, 1);
+            if (d >= xMin && d <= xMax) xMinorVals.push(d);
+          }
+        }
+      }
+      g.append('g').selectAll('line').data(xMajorVals).join('line')
+        .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
+        .attr('y1', 0).attr('y2', iH)
+        .attr('stroke', CHART.colorGrid).attr('stroke-width', 1);
+      g.append('g').selectAll('line').data(xMinorVals).join('line')
+        .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
+        .attr('y1', 0).attr('y2', iH)
+        .attr('stroke', CHART.colorGrid).attr('stroke-width', 0.5)
+        .attr('stroke-dasharray', '2,2');
+      g.append('g').selectAll('line').data(xMajorVals).join('line')
+        .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
+        .attr('y1', iH).attr('y2', iH + 6)
+        .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
+      g.append('g').selectAll('text').data(xMajorVals).join('text')
+        .attr('x', d => xScale(d)).attr('y', iH + 18)
+        .attr('text-anchor', 'middle')
+        .attr('font-family', CHART.font).attr('font-size', '0.75rem').attr('fill', CHART.colorLabel)
+        .text(d => d.getFullYear());
+
+      // ── Y axis
+      const yStep = Math.max(1000, Math.ceil(yMax / 6 / 1000) * 1000);
+      const yMajorVals = d3.range(0, yMax + 1, yStep);
+      g.append('g').selectAll('line').data(yMajorVals).join('line')
+        .attr('x1', 0).attr('x2', iW)
+        .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
+        .attr('stroke', CHART.colorGrid).attr('stroke-width', 1);
+      g.append('g').selectAll('line').data(yMajorVals).join('line')
+        .attr('x1', -6).attr('x2', 0)
+        .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
+        .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
+      g.append('g').selectAll('text').data(yMajorVals).join('text')
+        .attr('x', -10).attr('y', d => yScale(d))
+        .attr('dy', '0.32em').attr('text-anchor', 'end')
+        .attr('font-family', CHART.font).attr('font-size', '0.75rem').attr('fill', CHART.colorLabel)
+        .text(d => d === 0 ? '$0' : `$${d / 1000}k`);
+
+      // ── Curves (monthly staircase)
+      svg.append('defs').append('clipPath').attr('id', 'vac-plot-clip')
+        .append('rect').attr('width', iW).attr('height', iH);
+      const makeVacCurve = (accessor, color) => {
+        const line = d3.line()
+          .curve(d3.curveStepAfter)
+          .x(d => xScale(d.retDate))
+          .y(d => yScale(accessor(d)));
+        g.append('g').attr('clip-path', 'url(#vac-plot-clip)')
+          .append('path').datum(rows)
+          .attr('fill', 'none').attr('stroke', color).attr('stroke-width', 1.5)
+          .attr('d', line);
+      };
+      makeVacCurve(d => d.maxPayout,     CHART.colorVacationMax);
+      makeVacCurve(d => d.currentPayout, CHART.colorVacationCurrent);
+
+      // ── Axis baselines
+      g.append('line').attr('x1', 0).attr('x2', iW).attr('y1', iH).attr('y2', iH)
+        .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
+      g.append('line').attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', iH)
+        .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
+
+      // ── LDOS marker (committed future last-day-of-service)
+      const ldos = result.lastDayOfSvc;
+      if (ldos && ldos >= xMin && ldos <= xMax) {
+        const lx = xScale(ldos);
+        g.append('line')
+          .attr('x1', lx).attr('x2', lx).attr('y1', 0).attr('y2', iH)
+          .attr('stroke', CHART.colorMinor).attr('stroke-width', 1)
+          .attr('stroke-dasharray', '4,3');
+        g.append('text')
+          .attr('x', lx + 4).attr('y', 4)
+          .attr('text-anchor', 'start').attr('dominant-baseline', 'hanging')
+          .attr('font-family', CHART.font).attr('font-size', '0.7rem')
+          .attr('fill', CHART.colorMinor)
+          .text('Last day of service');
+      }
+
+      // ── Title
+      svg.append('text')
+        .attr('x', margin.left + iW / 2).attr('y', 16)
+        .attr('text-anchor', 'middle')
+        .attr('font-family', CHART.font).attr('font-size', '0.85rem').attr('font-weight', 'bold')
+        .attr('fill', CHART.colorTitle)
+        .text('Estimated Vacation Payout vs. Retirement Date');
+
+      // ── Axis labels
+      g.append('text')
+        .attr('x', iW / 2).attr('y', iH + 42)
+        .attr('text-anchor', 'middle')
+        .attr('font-family', CHART.font).attr('font-size', '0.8rem').attr('fill', CHART.colorLabel)
+        .text('Retirement Date');
+      g.append('text')
+        .attr('transform', `translate(${-(margin.left - 14)},${iH / 2}) rotate(-90)`)
+        .attr('text-anchor', 'middle')
+        .attr('font-family', CHART.font).attr('font-size', '0.8rem').attr('fill', CHART.colorLabel)
+        .text('Vacation Payout ($)');
+
+      // ── Legend below the x-axis label
+      const legendItems = [
+        { color: CHART.colorVacationMax,     label: 'vacation payout (max, no spending)' },
+        { color: CHART.colorVacationCurrent, label: 'vacation payout (current)'           },
+      ];
+      const swW = 20, gap1 = 5, gap2 = 36, charW = 8;
+      const entryW = e => swW + gap1 + e.label.length * charW + gap2;
+      const legRows = [];
+      let legRow = [], rowUsed = 0;
+      legendItems.forEach(e => {
+        const w = entryW(e);
+        if (legRow.length > 0 && rowUsed + w - gap2 > iW) {
+          legRows.push(legRow);
+          legRow = [{ ...e, x: 0 }];
+          rowUsed = w;
+        } else {
+          legRow.push({ ...e, x: rowUsed });
+          rowUsed += w;
+        }
+      });
+      if (legRow.length) legRows.push(legRow);
+      const rowH = 18, legStartY = iH + 65;
+      const leg = g.append('g');
+      legRows.forEach((rowItems, ri) => {
+        const y = legStartY + ri * rowH;
+        rowItems.forEach(e => {
+          leg.append('line')
+            .attr('x1', e.x).attr('x2', e.x + swW)
+            .attr('y1', y).attr('y2', y)
+            .attr('stroke', e.color).attr('stroke-width', 1.5);
+          leg.append('text')
+            .attr('x', e.x + swW + gap1).attr('y', y)
+            .attr('dominant-baseline', 'middle')
+            .attr('font-family', CHART.font).attr('font-size', '0.7rem').attr('fill', CHART.colorLabel)
+            .text(e.label);
+        });
+      });
+
+      // ── Tooltip
+      const bisect = d3.bisector(d => d.retDate).left;
+      const tip = g.append('g').attr('display', 'none');
+      tip.append('circle').attr('class', 'tip-vac-max')
+        .attr('r', 3.5).attr('fill', CHART.colorVacationMax);
+      tip.append('circle').attr('class', 'tip-vac-current')
+        .attr('r', 3.5).attr('fill', CHART.colorVacationCurrent);
+      const tipLabel = tip.append('g');
+      const tipRect = tipLabel.append('rect')
+        .attr('fill', 'white').attr('stroke', CHART.colorMinor).attr('rx', 3);
+      const tipText = tipLabel.append('text')
+        .attr('font-family', CHART.font).attr('font-size', '0.75rem')
+        .attr('fill', CHART.colorTitle).attr('dominant-baseline', 'hanging');
+
+      g.append('rect')
+        .attr('width', iW).attr('height', iH)
+        .attr('fill', 'none').attr('pointer-events', 'all')
+        .on('mousemove', function(event) {
+          const [mx] = d3.pointer(event);
+          const hoverDate = xScale.invert(mx);
+          let idx = bisect(rows, hoverDate);
+          if (idx >= rows.length) idx = rows.length - 1;
+          if (idx > 0 &&
+              Math.abs(rows[idx - 1].retDate - hoverDate) <
+              Math.abs(rows[idx].retDate - hoverDate)) idx--;
+          const pt = rows[idx];
+          const px = xScale(pt.retDate);
+
+          tip.select('.tip-vac-max')
+            .attr('cx', px).attr('cy', yScale(pt.maxPayout));
+          tip.select('.tip-vac-current')
+            .attr('cx', px).attr('cy', yScale(pt.currentPayout));
+
+          const fmt = v => Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+          tipText.selectAll('tspan').remove();
+          tipText.append('tspan')
+            .text(`${MONTHS[pt.retDate.getMonth()]} ${pt.retDate.getFullYear()} — `);
+          tipText.append('tspan').attr('fill', CHART.colorVacationMax)
+            .text(`$${fmt(pt.maxPayout)} (max)`);
+          tipText.append('tspan').text(', ');
+          tipText.append('tspan').attr('fill', CHART.colorVacationCurrent)
+            .text(`$${fmt(pt.currentPayout)} (current)`);
+
+          const pad = 6;
+          const bb = tipText.node().getBBox();
+          const lw = bb.width + pad * 2;
+          const lh = bb.height + pad * 2;
+          const lx = (iW - lw) / 2;
+          const ly = 0;
+          tipRect.attr('x', lx).attr('y', ly).attr('width', lw).attr('height', lh);
+          tipText.attr('x', lx + pad).attr('y', ly + pad);
+
+          tip.attr('display', null);
+        })
+        .on('mouseleave', () => tip.attr('display', 'none'));
     }
 
     drawChart();

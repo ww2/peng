@@ -3,7 +3,8 @@
     "allow": [
       "Bash(git log *)",
       "Bash(node --test tests/pension.test.js)",
-      "Bash(node --test tests/)"
+      "Bash(node --test tests/index-html.test.js)",
+      "Bash(node --test tests/*.test.js)"
     ]
   }
 }
