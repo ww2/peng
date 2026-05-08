@@ -240,7 +240,7 @@
     }
     #vac-action-row { margin-top: 0.5rem; }
 
-    #graph-btn, #clear-btn, #picker-btn, #cancel-btn, #vac-graph-btn {
+    #graph-btn, #clear-btn, #picker-btn, #cancel-btn, #vac-graph-btn, #vac-clear-btn {
       font-family: monospace;
       font-size: 0.95rem;
       padding: 0.35rem 1rem;
@@ -298,16 +298,18 @@
       border: 1px solid #ddd;
       background: #fafafa;
     }
-    /* Vacation chart sits below the pension chart and hides until vacation data is present */
+    /* Vacation chart sits below the pension chart. Always shown — empty axes
+       render when vacation fields are blank/incomplete, mirroring the pension
+       chart. The separated-on-or-before-today branch hides the SVG inline and
+       surfaces #vac-separated-message in its place. */
     #vac-chart-svg {
-      display: none;
+      display: block;
       width: 100%;
       height: 320px;
       border: 1px solid #ddd;
       background: #fafafa;
       margin-top: 0.4rem;
     }
-    #vac-chart-svg.has-data { display: block; }
 
     /* ── Series table ── */
     #series-details { margin: 0.6rem 0; }
@@ -551,7 +553,7 @@
           </label>
         </div>
         <div class="form-row" id="cache-clear-hint" style="font-size: 0.7rem; color: #888;" hidden>
-          Use the "Clear all fields" button to clear cached paystub data
+          Use the "Clear pension fields" button to clear cached paystub data
         </div>
         <div id="afc-computed"></div>
         <div id="afc-date-range"></div>
@@ -574,8 +576,8 @@
 
   <!-- ── Calculate ────────────────────────────────────────────── -->
   <div id="action-row">
-    <button id="graph-btn" type="button">Generate graph</button>
-    <button id="clear-btn" type="button">Clear all fields</button>
+    <button id="graph-btn" type="button">Generate pension graph</button>
+    <button id="clear-btn" type="button">Clear pension fields</button>
     <span id="status-line"></span>
   </div>
 
@@ -617,6 +619,7 @@
 
   <div id="vac-action-row">
     <button id="vac-graph-btn" type="button" disabled>Generate vacation graph</button>
+    <button id="vac-clear-btn" type="button">Clear vacation fields</button>
     <span id="vac-status-line"></span>
   </div>
 
@@ -728,6 +731,7 @@
     const vacHourlyRateEl   = document.getElementById('vac-hourly-rate');
     const vacRaisesNaEl     = document.getElementById('vac-raises-na');
     const vacGraphBtn       = document.getElementById('vac-graph-btn');
+    const vacClearBtn       = document.getElementById('vac-clear-btn');
     const vacStatusLine     = document.getElementById('vac-status-line');
     const vacSeparatedMsgEl = document.getElementById('vac-separated-message');
     const debugDetails     = document.getElementById('debug-details');
@@ -1727,15 +1731,17 @@
     }
 
     function runClear() {
-      // Form inputs
-      [planEl, dobEl, memDateEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, slAsOfEl, vacHoursEl, vacAsOfEl, vacHourlyRateEl]
+      // Pension-section form inputs (vacation inputs are owned by runClearVacation).
+      // The shared lastDay / Still-active controls live visually in the pension
+      // section and are reset here per spec; the vacation chart auto-fires off
+      // those changes if the user's vacation fields remain intact.
+      [planEl, dobEl, memDateEl, svcYearsEl, svcMonthsEl, svcAsOfEl, lastDayEl, manualAfcEl, slHoursEl, slAsOfEl]
         .forEach(el => { el.value = ''; });
       stillActiveEl.checked = true;
       syncLastDayState();
       syncSvcSplitVisibility();
       updateManualAfcNote();
       slRateEl.value = '14';
-      vacRateEl.value = '14';
 
       // PDF picker state
       pdfFiles        = {};
@@ -1772,11 +1778,10 @@
       memDateEl.classList.remove('input-error');
       setMemDateBannerEntry(null);
 
-      // Vacation section
-      raisesNaEl.checked    = false;
-      vacRaisesNaEl.checked = false;
-      vacGraphBtn.disabled  = true;
-      vacStatusLine.textContent = '';
+      // Pension-side raises-NA checkbox (the vacation-side mirror is reset
+      // automatically via the bidirectional sync — Stage 5/6 will replace the
+      // vacation-side checkbox with a passive notice).
+      raisesNaEl.checked = false;
 
       updateReloadLink();
       // Strip URL params now that the form is empty and cache toggle is off —
@@ -1788,6 +1793,18 @@
     }
 
     clearBtn.addEventListener('click', runClear);
+
+    function runClearVacation() {
+      [vacHoursEl, vacAsOfEl, vacHourlyRateEl].forEach(el => { el.value = ''; });
+      vacRateEl.value = '14';
+      vacGraphBtn.disabled      = true;
+      vacStatusLine.textContent = '';
+      drawVacationChart(null);
+      updateReloadLink();
+      history.replaceState(null, '', buildReloadUrl());
+    }
+
+    vacClearBtn.addEventListener('click', runClearVacation);
 
     graphBtn.addEventListener('click', () => {
       const errors = [];
@@ -2806,16 +2823,14 @@
       svg.selectAll('*').remove();
       const node = svg.node();
 
-      // Hide both the chart and the separated message by default.
-      node.classList.remove('has-data');
+      // Default: chart visible, separated-message hidden.
+      node.style.display = '';
       vacSeparatedMsgEl.hidden = true;
       vacSeparatedMsgEl.innerHTML = '';
 
-      if (!result) return;
-
       const fmtMoney = v => '$' + Math.round(v).toLocaleString('en-US');
 
-      if (result.separated) {
+      if (result && result.separated) {
         const d = result.separatedOn;
         const dStr = `${MONTHS[d.getMonth()]} ${d.getDate()} ${d.getFullYear()}`;
         const rateStr = `$${result.finalRate.toFixed(2)}/hr`;
@@ -2824,12 +2839,16 @@
           `<span class="sep-line sep-payout">Vacation payout: ${fmtMoney(result.finalPayout)} ` +
           `(${result.finalHours} hours × ${rateStr}).</span>`;
         vacSeparatedMsgEl.hidden = false;
+        node.style.display = 'none';
         return;
       }
 
-      const rows = result.rows;
-      if (!rows || !rows.length) return;
-      node.classList.add('has-data');
+      // Empty state still renders axes/title/legend so the chart frame stays
+      // visible while the user fills in vacation fields, mirroring the pension
+      // chart's behavior. Curves, LDOS marker and tooltip are skipped when
+      // there are no rows.
+      const rows = (result && result.rows) ? result.rows : [];
+      const hasRows = rows.length > 0;
 
       const W = node.clientWidth;
       const H = node.clientHeight;
@@ -2838,12 +2857,17 @@
       const iH = H - margin.top  - margin.bottom;
       const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
-      const xMin = rows[0].retDate;
-      const xMax = rows[rows.length - 1].retDate;
+      // Empty-frame defaults: 4-year span centered on today, $0–$50k y-range
+      // with $10k increments. Mirrors the pension chart's empty-frame habit.
+      const today = todayInHST();
+      const fallbackXMin = new Date(today.getFullYear() - 2, today.getMonth(), 1);
+      const fallbackXMax = new Date(today.getFullYear() + 2, today.getMonth(), 1);
+      const xMin = hasRows ? rows[0].retDate                 : fallbackXMin;
+      const xMax = hasRows ? rows[rows.length - 1].retDate : fallbackXMax;
       const xScale = d3.scaleTime().domain([xMin, xMax]).range([0, iW]);
 
-      const vacMax = Math.max(0, ...rows.map(r => r.maxPayout));
-      const yMax = Math.max(1000, Math.ceil(vacMax / 1000) * 1000);
+      const vacMax = hasRows ? Math.max(0, ...rows.map(r => r.maxPayout)) : 0;
+      const yMax = hasRows ? Math.max(1000, Math.ceil(vacMax / 1000) * 1000) : 50000;
       const yScale = d3.scaleLinear().domain([0, yMax]).range([iH, 0]);
 
       // ── X axis: yearly major ticks; quarterly minor ticks for short windows
@@ -2891,7 +2915,9 @@
         .text(d => d.getFullYear());
 
       // ── Y axis
-      const yStep = Math.max(1000, Math.ceil(yMax / 6 / 1000) * 1000);
+      const yStep = hasRows
+        ? Math.max(1000, Math.ceil(yMax / 6 / 1000) * 1000)
+        : 10000;
       const yMajorVals = d3.range(0, yMax + 1, yStep);
       g.append('g').selectAll('line').data(yMajorVals).join('line')
         .attr('x1', 0).attr('x2', iW)
@@ -2907,21 +2933,23 @@
         .attr('font-family', CHART.font).attr('font-size', '0.75rem').attr('fill', CHART.colorLabel)
         .text(d => d === 0 ? '$0' : `$${d / 1000}k`);
 
-      // ── Curves (monthly staircase)
-      svg.append('defs').append('clipPath').attr('id', 'vac-plot-clip')
-        .append('rect').attr('width', iW).attr('height', iH);
-      const makeVacCurve = (accessor, color) => {
-        const line = d3.line()
-          .curve(d3.curveStepAfter)
-          .x(d => xScale(d.retDate))
-          .y(d => yScale(accessor(d)));
-        g.append('g').attr('clip-path', 'url(#vac-plot-clip)')
-          .append('path').datum(rows)
-          .attr('fill', 'none').attr('stroke', color).attr('stroke-width', 1.5)
-          .attr('d', line);
-      };
-      makeVacCurve(d => d.maxPayout,     CHART.colorVacationMax);
-      makeVacCurve(d => d.currentPayout, CHART.colorVacationCurrent);
+      // ── Curves (monthly staircase) — only when rows are present.
+      if (hasRows) {
+        svg.append('defs').append('clipPath').attr('id', 'vac-plot-clip')
+          .append('rect').attr('width', iW).attr('height', iH);
+        const makeVacCurve = (accessor, color) => {
+          const line = d3.line()
+            .curve(d3.curveStepAfter)
+            .x(d => xScale(d.retDate))
+            .y(d => yScale(accessor(d)));
+          g.append('g').attr('clip-path', 'url(#vac-plot-clip)')
+            .append('path').datum(rows)
+            .attr('fill', 'none').attr('stroke', color).attr('stroke-width', 1.5)
+            .attr('d', line);
+        };
+        makeVacCurve(d => d.maxPayout,     CHART.colorVacationMax);
+        makeVacCurve(d => d.currentPayout, CHART.colorVacationCurrent);
+      }
 
       // ── Axis baselines
       g.append('line').attr('x1', 0).attr('x2', iW).attr('y1', iH).attr('y2', iH)
@@ -2930,7 +2958,7 @@
         .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
 
       // ── LDOS marker (committed future last-day-of-service)
-      const ldos = result.lastDayOfSvc;
+      const ldos = result ? result.lastDayOfSvc : null;
       if (ldos && ldos >= xMin && ldos <= xMax) {
         const lx = xScale(ldos);
         g.append('line')
@@ -3003,64 +3031,67 @@
         });
       });
 
-      // ── Tooltip
-      const bisect = d3.bisector(d => d.retDate).left;
-      const tip = g.append('g').attr('display', 'none');
-      tip.append('circle').attr('class', 'tip-vac-max')
-        .attr('r', 3.5).attr('fill', CHART.colorVacationMax);
-      tip.append('circle').attr('class', 'tip-vac-current')
-        .attr('r', 3.5).attr('fill', CHART.colorVacationCurrent);
-      const tipLabel = tip.append('g');
-      const tipRect = tipLabel.append('rect')
-        .attr('fill', 'white').attr('stroke', CHART.colorMinor).attr('rx', 3);
-      const tipText = tipLabel.append('text')
-        .attr('font-family', CHART.font).attr('font-size', '0.75rem')
-        .attr('fill', CHART.colorTitle).attr('dominant-baseline', 'hanging');
+      // ── Tooltip — only when rows are present.
+      if (hasRows) {
+        const bisect = d3.bisector(d => d.retDate).left;
+        const tip = g.append('g').attr('display', 'none');
+        tip.append('circle').attr('class', 'tip-vac-max')
+          .attr('r', 3.5).attr('fill', CHART.colorVacationMax);
+        tip.append('circle').attr('class', 'tip-vac-current')
+          .attr('r', 3.5).attr('fill', CHART.colorVacationCurrent);
+        const tipLabel = tip.append('g');
+        const tipRect = tipLabel.append('rect')
+          .attr('fill', 'white').attr('stroke', CHART.colorMinor).attr('rx', 3);
+        const tipText = tipLabel.append('text')
+          .attr('font-family', CHART.font).attr('font-size', '0.75rem')
+          .attr('fill', CHART.colorTitle).attr('dominant-baseline', 'hanging');
 
-      g.append('rect')
-        .attr('width', iW).attr('height', iH)
-        .attr('fill', 'none').attr('pointer-events', 'all')
-        .on('mousemove', function(event) {
-          const [mx] = d3.pointer(event);
-          const hoverDate = xScale.invert(mx);
-          let idx = bisect(rows, hoverDate);
-          if (idx >= rows.length) idx = rows.length - 1;
-          if (idx > 0 &&
-              Math.abs(rows[idx - 1].retDate - hoverDate) <
-              Math.abs(rows[idx].retDate - hoverDate)) idx--;
-          const pt = rows[idx];
-          const px = xScale(pt.retDate);
+        g.append('rect')
+          .attr('width', iW).attr('height', iH)
+          .attr('fill', 'none').attr('pointer-events', 'all')
+          .on('mousemove', function(event) {
+            const [mx] = d3.pointer(event);
+            const hoverDate = xScale.invert(mx);
+            let idx = bisect(rows, hoverDate);
+            if (idx >= rows.length) idx = rows.length - 1;
+            if (idx > 0 &&
+                Math.abs(rows[idx - 1].retDate - hoverDate) <
+                Math.abs(rows[idx].retDate - hoverDate)) idx--;
+            const pt = rows[idx];
+            const px = xScale(pt.retDate);
 
-          tip.select('.tip-vac-max')
-            .attr('cx', px).attr('cy', yScale(pt.maxPayout));
-          tip.select('.tip-vac-current')
-            .attr('cx', px).attr('cy', yScale(pt.currentPayout));
+            tip.select('.tip-vac-max')
+              .attr('cx', px).attr('cy', yScale(pt.maxPayout));
+            tip.select('.tip-vac-current')
+              .attr('cx', px).attr('cy', yScale(pt.currentPayout));
 
-          const fmt = v => Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-          tipText.selectAll('tspan').remove();
-          tipText.append('tspan')
-            .text(`${pt.retDate.getFullYear()} ${MONTHS[pt.retDate.getMonth()]} ${pt.retDate.getDate()} — `);
-          tipText.append('tspan').attr('fill', CHART.colorVacationMax)
-            .text(`$${fmt(pt.maxPayout)} (accrued)`);
-          tipText.append('tspan').text(', ');
-          tipText.append('tspan').attr('fill', CHART.colorVacationCurrent)
-            .text(`$${fmt(pt.currentPayout)} (current)`);
+            const fmt = v => Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            tipText.selectAll('tspan').remove();
+            tipText.append('tspan')
+              .text(`${pt.retDate.getFullYear()} ${MONTHS[pt.retDate.getMonth()]} ${pt.retDate.getDate()} — `);
+            tipText.append('tspan').attr('fill', CHART.colorVacationMax)
+              .text(`$${fmt(pt.maxPayout)} (accrued)`);
+            tipText.append('tspan').text(', ');
+            tipText.append('tspan').attr('fill', CHART.colorVacationCurrent)
+              .text(`$${fmt(pt.currentPayout)} (current)`);
 
-          const pad = 6;
-          const bb = tipText.node().getBBox();
-          const lw = bb.width + pad * 2;
-          const lh = bb.height + pad * 2;
-          const lx = (iW - lw) / 2;
-          const ly = 0;
-          tipRect.attr('x', lx).attr('y', ly).attr('width', lw).attr('height', lh);
-          tipText.attr('x', lx + pad).attr('y', ly + pad);
+            const pad = 6;
+            const bb = tipText.node().getBBox();
+            const lw = bb.width + pad * 2;
+            const lh = bb.height + pad * 2;
+            const lx = (iW - lw) / 2;
+            const ly = 0;
+            tipRect.attr('x', lx).attr('y', ly).attr('width', lw).attr('height', lh);
+            tipText.attr('x', lx + pad).attr('y', ly + pad);
 
-          tip.attr('display', null);
-        })
-        .on('mouseleave', () => tip.attr('display', 'none'));
+            tip.attr('display', null);
+          })
+          .on('mouseleave', () => tip.attr('display', 'none'));
+      }
     }
 
     drawChart();
+    drawVacationChart();
   </script>
 </body>
 </html>

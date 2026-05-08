@@ -30,7 +30,7 @@ Four pension fieldsets in `index.html:388-516`, plus a separate vacation fieldse
 4. **Earnings data** — manual monthly AFC OR paystub directory picker (DP solver writes the computed AFC into the manual field)
 5. **Vacation** (`#group-vacation-input`, below the pension chart) — vacation hours / as-of / accrual rate (default 14) / hourly rate, plus a vacation-side "Projected raises do not apply" checkbox kept bidirectionally in sync with the pension-side one (see `syncRaisesNaFrom` (`index.html:1536`)). Drives its own chart and own Generate-vacation-graph button. Reads `lastDay` / `stillActive` from the pension form rather than duplicating them.
 
-`canCalculate()` (`index.html:1479`) gates the pension Generate-graph button on: plan + dob + memDate (range-valid) + svcAsOf + (Still active OR lastDay) + positive AFC + (no SL hours OR slAsOf set). Vacation has no influence on this gate. `canCalculateVacation()` (`:1500`) gates the vacation button independently on: `vacHours` ≥ 0 + `vacAsOf` + `vacHourlyRate` > 0 + (Still active OR lastDay). `validateMemDate()` (`:1462`) hard-blocks future-dated memDate and soft-flags memDate before DOB or before DOB+18.
+`canCalculate()` (`index.html:1479`) gates the pension Generate-pension-graph button on: plan + dob + memDate (range-valid) + svcAsOf + (Still active OR lastDay) + positive AFC + (no SL hours OR slAsOf set). Vacation has no influence on this gate. `canCalculateVacation()` (`:1500`) gates the vacation button independently on: `vacHours` ≥ 0 + `vacAsOf` + `vacHourlyRate` > 0 + (Still active OR lastDay). `validateMemDate()` (`:1462`) hard-blocks future-dated memDate and soft-flags memDate before DOB or before DOB+18.
 
 ## Plan key derivation
 

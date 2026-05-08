@@ -11,6 +11,11 @@ rate and as-of date based on the date of the last scanned PDF paystub
 (either immediately post-scan, or populating from the cache when the
 page loads iff the cache is populated and the 'use cache' flag is set)
 
+Under 'Earnings data' the 'Regular avg earnings' output is a bit confusing -- please replace that with 'Current monthly earnings as of', using the date and value from the most recent complete pay period.
+
+# caching
+The UI for cache-management is confusing, since there's a checkbox but clearing it doesn't *clear* the cache, it just prevents it from being used at the next reload; and the cache gets cleared as a side-effect of clearing the pension fields.  How would you recommend making the interaction of the UI and the cache easier to understand?
+
 # insecurity
 Having all the field values as urlParams was very helpful during initial
 development when I was constantly reloading the page; and is still useful
