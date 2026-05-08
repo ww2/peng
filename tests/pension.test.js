@@ -359,6 +359,124 @@ test('projectAfcAtRetirement', async (t) => {
   });
 });
 
+// ── snapWalkVacationHours ─────────────────────────────────────────────
+const { snapWalkVacationHours } = require('../lib/pension.js');
+
+test('snapWalkVacationHours', async (t) => {
+  await t.test('1. identity: endDate == startDate → returns startHours', () => {
+    const d = new Date(2025, 0, 1);
+    const h = snapWalkVacationHours({
+      startHours: 500, startDate: d, endDate: d, accrualHrsPerMo: 14,
+    });
+    assert.equal(h, 500);
+  });
+
+  await t.test('2. same-year walk under cap: Jan 1 → Dec 1, 720 + 11×14 → 874', () => {
+    const h = snapWalkVacationHours({
+      startHours: 720,
+      startDate:  new Date(2025, 0, 1),
+      endDate:    new Date(2025, 11, 1),
+      accrualHrsPerMo: 14,
+    });
+    assert.equal(h, 874);
+  });
+
+  await t.test('3. single Jan 1 crossing hits cap: Jan 1 2025 → Jan 1 2026, 720 + 168 then snap → 720', () => {
+    const h = snapWalkVacationHours({
+      startHours: 720,
+      startDate:  new Date(2025, 0, 1),
+      endDate:    new Date(2026, 0, 1),
+      accrualHrsPerMo: 14,
+    });
+    assert.equal(h, 720);
+  });
+
+  await t.test('4. single Jan 1 crossing under cap: 400 + 168 → 568, no snap', () => {
+    const h = snapWalkVacationHours({
+      startHours: 400,
+      startDate:  new Date(2025, 0, 1),
+      endDate:    new Date(2026, 0, 1),
+      accrualHrsPerMo: 14,
+    });
+    assert.equal(h, 568);
+  });
+
+  await t.test('5. multi-year sawtooth: 30 months Jan 1 2025 → Jul 1 2027, 720 start → 804', () => {
+    // y=2026: snap to 720. y=2027: snap to 720. Then 6 months × 14 = 84.
+    const h = snapWalkVacationHours({
+      startHours: 720,
+      startDate:  new Date(2025, 0, 1),
+      endDate:    new Date(2027, 6, 1),
+      accrualHrsPerMo: 14,
+    });
+    assert.equal(h, 804);
+  });
+
+  await t.test('6. mid-year start crossing Jan 1: Jul 15 2025 → Jan 1 2026, 800 hrs, accrual=0 → snap to 720', () => {
+    const h = snapWalkVacationHours({
+      startHours: 800,
+      startDate:  new Date(2025, 6, 15),
+      endDate:    new Date(2026, 0, 1),
+      accrualHrsPerMo: 0,
+    });
+    assert.equal(h, 720);
+  });
+
+  await t.test('7. endDate < startDate → returns startHours clamped ≥ 0', () => {
+    const h = snapWalkVacationHours({
+      startHours: 400,
+      startDate:  new Date(2026, 0, 1),
+      endDate:    new Date(2025, 0, 1),
+      accrualHrsPerMo: 14,
+    });
+    assert.equal(h, 400);
+    const hNeg = snapWalkVacationHours({
+      startHours: -50,
+      startDate:  new Date(2026, 0, 1),
+      endDate:    new Date(2025, 0, 1),
+      accrualHrsPerMo: 14,
+    });
+    assert.equal(hNeg, 0);
+  });
+
+  await t.test('8. excludeFinalSnap suppresses snap at endDate=Jan 1: 720 + 168 → 888', () => {
+    const h = snapWalkVacationHours({
+      startHours: 720,
+      startDate:  new Date(2025, 0, 1),
+      endDate:    new Date(2026, 0, 1),
+      accrualHrsPerMo: 14,
+      excludeFinalSnap: true,
+    });
+    assert.equal(h, 888);
+  });
+
+  await t.test('9. excludeFinalSnap only skips the FINAL boundary: earlier Jan 1 still snaps', () => {
+    // 2-year walk: snap at Jan 1 2026 fires, then 12 more accruals to Jan 1 2027 (skipped) → 888.
+    const h = snapWalkVacationHours({
+      startHours: 720,
+      startDate:  new Date(2025, 0, 1),
+      endDate:    new Date(2027, 0, 1),
+      accrualHrsPerMo: 14,
+      excludeFinalSnap: true,
+    });
+    assert.equal(h, 888);
+  });
+
+  await t.test('10. excludeFinalSnap is a no-op when endDate isn\'t Jan 1', () => {
+    // Dec 1 endDate, with vs without flag → identical (no boundary at endDate to skip).
+    const args = {
+      startHours: 720,
+      startDate:  new Date(2025, 0, 1),
+      endDate:    new Date(2025, 11, 1),
+      accrualHrsPerMo: 14,
+    };
+    const a = snapWalkVacationHours(args);
+    const b = snapWalkVacationHours({ ...args, excludeFinalSnap: true });
+    assert.equal(a, b);
+    assert.equal(a, 874);
+  });
+});
+
 // ── vacationPayoutAt ──────────────────────────────────────────────────
 test('vacationPayoutAt', async (t) => {
   await t.test('1. linear accrual sanity: 12 months at 14 hrs/mo from 0 → 168 hrs', () => {
@@ -374,7 +492,9 @@ test('vacationPayoutAt', async (t) => {
     assert.equal(r.projectedHourlyRate, 1);
   });
 
-  await t.test('2. 720 cap at as-of date when vacHoursAsOf > 720', () => {
+  await t.test('2. no Jan 1 cross within window → no snap', () => {
+    // vacAsOf Jan 1, retDate Feb 1: same year, no Jan 1 boundary crossed.
+    // Hours stay above 720 on both curves; only accrual differs.
     const r = vacationPayoutAt(new Date(2025, 1, 1), {
       vacHoursAsOf: 800,
       vacAsOfDate:  new Date(2025, 0, 1),
@@ -382,13 +502,18 @@ test('vacationPayoutAt', async (t) => {
       hourlyRateAtAsOf: 10,
       raises: [],
     });
-    // Cap clamps both curves to 720 even though raw hours would be 800 / 814.
-    assert.equal(r.currentPayout, VACATION_CAP_HOURS * 10);
-    assert.equal(r.maxPayout,    VACATION_CAP_HOURS * 10);
+    assert.equal(r.currentPayout, 800 * 10);
+    assert.equal(r.maxPayout,    814 * 10);  // 800 + 14×1 month
   });
 
-  await t.test('3. 720 cap applied mid-projection on max-no-spend curve', () => {
-    // 400 + 14×60 = 1240 → clamped to 720
+  await t.test('3. multi-year sawtooth on max curve, current under cap stays flat', () => {
+    // vacAsOf Jan 1 2025 → retDate Jan 1 2030. Max-curve trajectory:
+    //   y=2026: 400 + 168 = 568 (no snap, under 720)
+    //   y=2027: 568 + 168 = 736 → snap to 720
+    //   y=2028: 720 + 168 = 888 → snap to 720
+    //   y=2029: 720 + 168 = 888 → snap to 720
+    //   y=2030: 720 + 168 = 888 → snap to 720
+    // Current curve: 400 stays at 400 across all snaps (under cap).
     const r = vacationPayoutAt(new Date(2030, 0, 1), {
       vacHoursAsOf: 400,
       vacAsOfDate:  new Date(2025, 0, 1),
@@ -508,6 +633,56 @@ test('vacationPayoutAt', async (t) => {
     assert.ok(Math.abs(r.projectedHourlyRate - expectedRate) < 1e-9,
       `projectedHourlyRate=${r.projectedHourlyRate} expected=${expectedRate}`);
     assert.equal(r.maxPayout, 168 * expectedRate);
+  });
+
+  await t.test('11. in-year peak: 720 start, retDate Dec 1 same year → maxPayout = 874', () => {
+    const r = vacationPayoutAt(new Date(2025, 11, 1), {
+      vacHoursAsOf: 720,
+      vacAsOfDate:  new Date(2025, 0, 1),
+      accrualHrsPerMo: 14,
+      hourlyRateAtAsOf: 1,
+      raises: [],
+    });
+    assert.equal(r.maxPayout, 874);
+    assert.equal(r.currentPayout, 720);
+  });
+
+  await t.test('12. Jan 1 snap consumes the year of accrual: 720 start → maxPayout = 720 at Jan 1 next year', () => {
+    const r = vacationPayoutAt(new Date(2026, 0, 1), {
+      vacHoursAsOf: 720,
+      vacAsOfDate:  new Date(2025, 0, 1),
+      accrualHrsPerMo: 14,
+      hourlyRateAtAsOf: 1,
+      raises: [],
+    });
+    assert.equal(r.maxPayout, 720);
+    assert.equal(r.currentPayout, 720);
+  });
+
+  await t.test('13. current curve snaps too: 800 start, retDate Feb 1 next year → currentPayout = 720', () => {
+    const r = vacationPayoutAt(new Date(2026, 1, 1), {
+      vacHoursAsOf: 800,
+      vacAsOfDate:  new Date(2025, 0, 1),
+      accrualHrsPerMo: 0,
+      hourlyRateAtAsOf: 1,
+      raises: [],
+    });
+    assert.equal(r.currentPayout, 720);
+    assert.equal(r.maxPayout, 720);
+  });
+
+  await t.test('14. excludeFinalSnap exposes pre-snap peak at Jan 1 retDate', () => {
+    // 800 start, retDate Jan 1 2026, accrual 14, flag on → 968 hrs (12 accruals, snap suppressed).
+    const r = vacationPayoutAt(new Date(2026, 0, 1), {
+      vacHoursAsOf: 800,
+      vacAsOfDate:  new Date(2025, 0, 1),
+      accrualHrsPerMo: 14,
+      hourlyRateAtAsOf: 1,
+      raises: [],
+      excludeFinalSnap: true,
+    });
+    assert.equal(r.maxPayout, 968);
+    assert.equal(r.currentPayout, 800);  // current curve: 800 held flat, snap at endDate suppressed
   });
 });
 
@@ -709,7 +884,7 @@ test('buildVacationSeries', async (t) => {
   const today = todayInHST();
   const startMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
-  await t.test('1. active member, no LDOS → today → today+24mo, monthly rows', () => {
+  await t.test('1. active member, no LDOS → today → today+24mo, monthly rows + Dec 31 peaks', () => {
     const result = buildVacationSeries({
       vacHours: 400,
       vacAsOf:  new Date(2025, 0, 1),
@@ -720,13 +895,31 @@ test('buildVacationSeries', async (t) => {
     assert.equal(result.separated, false);
     assert.ok(result.rows.length > 0);
     assert.equal(result.rows[0].retDate.getTime(), startMonth.getTime());
-    const lastRow = result.rows[result.rows.length - 1];
     const expectedEnd = addMonths(startMonth, 24);
-    assert.equal(lastRow.retDate.getTime(), expectedEnd.getTime());
-    // Each row is one month apart
+    assert.equal(result.rows[result.rows.length - 1].retDate.getTime(), expectedEnd.getTime());
+
+    // Month-1 rows are one month apart.
+    const monthlyRows = result.rows.filter(r => r.retDate.getDate() === 1);
+    for (let i = 1; i < monthlyRows.length; i++) {
+      const gap = monthsBetween(monthlyRows[i - 1].retDate, monthlyRows[i].retDate);
+      assert.equal(gap, 1, `monthly row ${i} is not one month after row ${i - 1}`);
+    }
+
+    // One Dec 31 peak row per year-end inside [startMonth, expectedEnd].
+    const peakRows = result.rows.filter(r => r.retDate.getDate() === 31 && r.retDate.getMonth() === 11);
+    const expectedPeakYears = [];
+    for (let y = startMonth.getFullYear(); y <= expectedEnd.getFullYear(); y++) {
+      const ye = new Date(y, 11, 31);
+      if (ye >= startMonth && ye <= expectedEnd) expectedPeakYears.push(y);
+    }
+    assert.equal(peakRows.length, expectedPeakYears.length);
+    for (let i = 0; i < peakRows.length; i++) {
+      assert.equal(peakRows[i].retDate.getFullYear(), expectedPeakYears[i]);
+    }
+
+    // Rows are sorted by retDate.
     for (let i = 1; i < result.rows.length; i++) {
-      const gap = monthsBetween(result.rows[i - 1].retDate, result.rows[i].retDate);
-      assert.equal(gap, 1, `row ${i} is not one month after row ${i - 1}`);
+      assert.ok(result.rows[i].retDate >= result.rows[i - 1].retDate, `row ${i} out of order`);
     }
   });
 
@@ -780,7 +973,9 @@ test('buildVacationSeries', async (t) => {
     assert.ok(result.finalRate > 0);
   });
 
-  await t.test('5. already separated, hours over cap → finalHours clamps to 720', () => {
+  await t.test('5. no Jan 1 cross → finalHours retains accrual above 720', () => {
+    // vacAsOf Jan 1 2024 → LDOS Jul 1 2024: same calendar year, no snap.
+    // 800 + 14×6 = 884.
     const result = buildVacationSeries({
       vacHours: 800,
       vacAsOf:  new Date(2024, 0, 1),
@@ -789,8 +984,8 @@ test('buildVacationSeries', async (t) => {
       lastDayOfSvc: new Date(2024, 6, 1),
     });
     assert.equal(result.separated, true);
-    assert.equal(result.finalHours, VACATION_CAP_HOURS);
-    assert.equal(result.finalPayout, VACATION_CAP_HOURS * result.finalRate);
+    assert.equal(result.finalHours, 884);
+    assert.equal(result.finalPayout, 884 * result.finalRate);
   });
 
   await t.test('6. raisesNA: true suppresses raise compounding on hourly rate', () => {
@@ -836,5 +1031,60 @@ test('buildVacationSeries', async (t) => {
     assert.ok(result.rows.length > 0);
     for (const row of result.rows) assert.equal(row.currentPayout, 0);
     assert.ok(result.rows[result.rows.length - 1].maxPayout > result.rows[0].maxPayout);
+  });
+
+  await t.test('9. Dec 31 peak row exceeds adjacent Dec 1 by exactly one extra month of accrual', () => {
+    // raisesNA: true keeps the hourly rate flat at 50 so the diff is
+    // exactly accrualHrsPerMo × hourlyRate = 14 × 50 = 700.
+    const result = buildVacationSeries({
+      vacHours: 800,
+      vacAsOf:  new Date(today.getFullYear() - 1, 0, 1),
+      vacRate:  14,
+      vacHourlyRate: 50,
+      lastDayOfSvc: null,
+      raisesNA: true,
+    });
+    const peak = result.rows.find(r => r.retDate.getDate() === 31 && r.retDate.getMonth() === 11);
+    assert.ok(peak, 'Dec 31 peak row should be present');
+    const dec1 = result.rows.find(r =>
+      r.retDate.getDate() === 1 &&
+      r.retDate.getMonth() === 11 &&
+      r.retDate.getFullYear() === peak.retDate.getFullYear());
+    assert.ok(dec1, 'matching Dec 1 row should be present');
+    assert.equal(peak.maxPayout - dec1.maxPayout, 14 * 50);
+  });
+
+  await t.test('10. future LDOS in Mar of next year → no peak rows past LDOS', () => {
+    const ldos = new Date(today.getFullYear() + 1, 2, 1);  // Mar 1 next year
+    const result = buildVacationSeries({
+      vacHours: 800,
+      vacAsOf:  new Date(today.getFullYear() - 1, 0, 1),
+      vacRate:  14,
+      vacHourlyRate: 50,
+      lastDayOfSvc: ldos,
+    });
+    const peakRows = result.rows.filter(r => r.retDate.getDate() === 31 && r.retDate.getMonth() === 11);
+    for (const r of peakRows) {
+      assert.ok(r.retDate <= ldos, `Dec 31 row ${r.retDate} should not be past LDOS ${ldos}`);
+    }
+    // At least one peak row from a year-end strictly before LDOS exists
+    // (today's Dec 31 is in [startMonth, ldos] for any today before Mar 2 of next year).
+    assert.ok(peakRows.length >= 1, 'expected at least one Dec 31 peak row before LDOS');
+  });
+
+  await t.test('8. already separated, LDOS crosses Jan 1 → finalHours snaps then re-accrues', () => {
+    // vacAsOf Jan 1 2024 → LDOS Mar 1 2025: walk crosses Jan 1 2025.
+    // y=2025: 800 + 14×12 = 968 → snap to 720.
+    // trailing: 14 × 2 months = 28 → finalHours = 748.
+    const result = buildVacationSeries({
+      vacHours: 800,
+      vacAsOf:  new Date(2024, 0, 1),
+      vacRate:  14,
+      vacHourlyRate: 50,
+      lastDayOfSvc: new Date(2025, 2, 1),
+    });
+    assert.equal(result.separated, true);
+    assert.equal(result.finalHours, 748);
+    assert.equal(result.finalPayout, 748 * result.finalRate);
   });
 });

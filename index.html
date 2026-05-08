@@ -2872,6 +2872,15 @@
         .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
         .attr('y1', iH).attr('y2', iH + 6)
         .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
+      // Monthly tick marks (Feb–Dec); Jan ticks are covered by xMajorVals.
+      const xMonthlyVals = [];
+      for (let m = new Date(xMin.getFullYear(), xMin.getMonth(), 1); m <= xMax; m = addMonths(m, 1)) {
+        if (m >= xMin && m.getMonth() !== 0) xMonthlyVals.push(new Date(m));
+      }
+      g.append('g').selectAll('line').data(xMonthlyVals).join('line')
+        .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
+        .attr('y1', iH).attr('y2', iH + 3)
+        .attr('stroke', CHART.colorAxis).attr('stroke-width', 1);
       g.append('g').selectAll('text').data(xMajorVals).join('text')
         .attr('x', d => xScale(d)).attr('y', iH + 18)
         .attr('text-anchor', 'middle')
@@ -2955,7 +2964,7 @@
 
       // ── Legend below the x-axis label
       const legendItems = [
-        { color: CHART.colorVacationMax,     label: 'vacation payout (max, no spending)' },
+        { color: CHART.colorVacationMax,     label: 'vacation payout (accrued, no spending)' },
         { color: CHART.colorVacationCurrent, label: 'vacation payout (current)'           },
       ];
       const swW = 20, gap1 = 5, gap2 = 36, charW = 8;
@@ -3027,9 +3036,9 @@
           const fmt = v => Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
           tipText.selectAll('tspan').remove();
           tipText.append('tspan')
-            .text(`${MONTHS[pt.retDate.getMonth()]} ${pt.retDate.getFullYear()} — `);
+            .text(`${pt.retDate.getFullYear()} ${MONTHS[pt.retDate.getMonth()]} ${pt.retDate.getDate()} — `);
           tipText.append('tspan').attr('fill', CHART.colorVacationMax)
-            .text(`$${fmt(pt.maxPayout)} (max)`);
+            .text(`$${fmt(pt.maxPayout)} (accrued)`);
           tipText.append('tspan').text(', ');
           tipText.append('tspan').attr('fill', CHART.colorVacationCurrent)
             .text(`$${fmt(pt.currentPayout)} (current)`);
