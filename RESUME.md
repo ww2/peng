@@ -1,42 +1,65 @@
-# Resume notes — clear-button re-scoping
+# Resume notes — vacation/pension raises-NA two-checkbox revert
 
-Pause point at end of Stage 4 of `PLAN.md`. Three stages remain (5, 6, 7).
+Mid-conversation pause to switch machines. **All work is uncommitted** — per CLAUDE.md global instructions I can't run git writes, so you'll need to stage / commit / push from this machine and pull on the other before resuming.
 
 ## Branch / commit state
 
 - Branch: `vacation`
-- All work uncommitted (per CLAUDE.md, git writes are user-only).
-- Files touched so far: `index.html`, `CLAUDE.md`, plus this `RESUME.md` and `PLAN.md`.
+- Tip: `b663be6 checkpoint: OOT`
+- Uncommitted (mixed staged + unstaged): `CLAUDE.md`, `PLAN.md`, `NEXT.md`, `index.html`. `RESUME.md` is currently deleted in the working tree — this file replaces it. `notes.md` is untracked.
+- Recommended pre-switch steps: `git add -A && git commit -m "checkpoint: vacation raises-NA revert WIP" && git push` (these are user-action steps; I can't run them).
 
-## What's done (Stages 1–4, plus a mid-flight 3a + the pension-button rename)
+## What's landed in this session (per `PLAN.md`)
 
-1. `Clear all fields` button → `Clear pension fields` (`index.html:578`); cache-clear hint updated (`index.html:554`).
-2. New `Clear vacation fields` button added to `#vac-action-row` (`index.html:620`); CSS selector at `:243` extended; JS reference `vacClearBtn` declared (`:732`).
-3. `runClearVacation()` implemented (`index.html:~1794`) — vacation-only scope (clears `vacHoursEl`/`vacAsOfEl`/`vacHourlyRateEl`, resets `vacRateEl` to `'14'`, disables button, clears status line, calls `drawVacationChart(null)`, refreshes URL via `buildReloadUrl()`).
-3a. Empty vacation chart now renders axes for symmetry with the pension chart. Empty-frame defaults: x-axis `today − 2yr` → `today + 2yr` (anchored to today's month-1st); y-axis `$0–$50k` with `$10k` increments. Drop the `display: none` / `.has-data` CSS toggle on `#vac-chart-svg`; the separated branch now uses inline `node.style.display = 'none'` so `#vac-separated-message` can take its place. Added `drawVacationChart()` at script tail (`:3089`) so the empty frame renders on initial load.
-4. `runClear()` re-scoped to pension-only — vacation form inputs no longer cleared, `vacGraphBtn.disabled` / `vacStatusLine.textContent` lines dropped, `vacRaisesNaEl.checked = false` dropped (the bidirectional sync still wipes it via `raisesNaEl.checked = false` until Stage 5/6). Shared `stillActiveEl`/`lastDayEl` reset stays (per user spec). `drawVacationChart(null)` retained as the explicit visual blank.
-- Mid-flight rename: `Generate graph` → `Generate pension graph` (`index.html:577`); CLAUDE.md updated to match.
+All marked **Complete (pending manual browser verification)**:
 
-All 75 tests pass after each stage. Manual browser verification has NOT been performed for Stages 3, 3a, or 4 — flag this when resuming.
+- **Stages 1–4** — Clear-button re-scoping (pension/vacation clears now independent).
+- **Stages 4.5, 4.6** — Vacation-scoped error banner; pension-clear stopped blanking vacation chart (recomputes instead).
+- **Stages 5+6 (combined)** — Replaced `#vac-raises-na` checkbox with a passive notice + one-way pension→vacation sync. **NOTE: this is being reverted by Stages 9+.**
+- **Stage 7** — CLAUDE.md cleanup for the (now-being-reverted) one-way model.
+- **Stage 8a** — `updateContractualVisibility()` helper: contractual fieldset now visible when pension uses raises OR vacation can graph; `#raises-note` informational div added.
 
-## What's next (Stages 5–7 in PLAN.md)
+No commits have been made during this session — all work is in the working tree.
 
-**Stage 5** — replace `#vac-raises-na` checkbox at `index.html:609-613` with a passive notice div `#vac-raises-na-notice`. Visible only when `#raises-na` is checked. Proposed text: `Projected raises do not apply (set in pension section)`.
+## What's pending (in order)
 
-**Stage 6** — collapse `syncRaisesNaFrom` (`index.html:1539`) to a one-way `updateVacRaisesNotice()`. Drop the `vacRaisesNaEl` symbol everywhere (search for `vacRaisesNaEl` and `vac-raises-na`). Update `applyRaisesNALock` (`:1903`). The temporary "Stage 5/6 will replace…" comment in `runClear` becomes obsolete — clean it up here or in Stage 7.
+Detail in `PLAN.md`. High-level:
 
-**Stage 7** — doc cleanup. CLAUDE.md still describes the bidirectional sync; lines to update are the `Vacation` fieldset description (around line 31) and the `Dual raises-NA sync` entry. Final test pass.
+- **Stage 8b** — CLAUDE.md cleanup for Stage 8a's visibility changes. (Could be folded into Stage 13.)
+- **Stages 9a, 9b** — Revert Stages 5+6: bring back the standalone `#vac-raises-na` checkbox + label; rewire `runVacationCalculate` to read it; drop `updateVacRaisesNotice` and the one-way sync. Two checkboxes are intentionally allowed to diverge.
+- **Stages 10a, 10b, 10c** — Add the pension-side "no projection" auto-lock. 10a refactors `applyRaisesNALock` to take `{ pensionUsesRaises, noRaisesApply }` and adds `RAISES_NA_NOPROJ_SUFFIX = " — pension AFC isn't projecting raises with the current inputs"`. 10a *also* drops `raisesTableRowEl.hidden = …` from the lock function (per user direction, table stays visible whenever fieldset is). 10b drives the lock from `updateContractualVisibility` so it stays current outside `runCalculate`. 10c removes the inline `<script>` listener at `index.html:509-515` that hides the table when the user manually checks the pension checkbox (further decoupling).
+- **Stage 11** — Add the vacation-side "lastDay-cutoff" auto-lock via new `applyVacRaisesNALock()`. Trigger: `canCalculateVacation && lastDay set && !RAISES.some(r => r > vacAsOf && r <= lastDay)`. Suffix: verbatim `" due to the Last day of service above"` (since `lastDay` lives in the pension form visually above the vacation checkbox).
+- **Stage 12** — Reword `#raises-note` to drop redundancy with the new pension NOPROJ suffix:
+  > These raises are projected through the vacation hourly rate. Load paystubs above to also project them through pension AFC.
+- **Stage 13** — Final CLAUDE.md doc cleanup covering Stages 9–12 + the table-visibility decoupling from Stages 10a/10c.
 
-## Open decisions / agreements with the user
+## Open decisions / agreements from this session
 
-- Pension-clear DOES reset shared `lastDay` / `stillActive` and DOES clear both graphs (per user clarification on PLAN draft).
-- Vacation-clear leaves shared `lastDay` / `stillActive` and the pension-side raises-NA checkbox alone.
-- Vacation-side raises-NA checkbox is being demoted to a passive notice — the pension-side checkbox is the single source of truth.
-- Notice text proposed (not yet user-confirmed in writing): `Projected raises do not apply (set in pension section)`. User did not push back on the proposal; treat as approved unless they revisit.
+- **Two checkboxes, no sync** — User explicitly accepts that pension and vacation raises-NA checkboxes can diverge.
+- **Vacation defaults** — Vacation checkbox defaults unchecked (raises apply).
+- **Pension default behavior** — Pension checkbox checked + disabled unless pension info supports projection (no paystubs AND not regular-mode-with-manual-AFC).
+- **Suffix wordings** — Both confirmed verbatim:
+  - Pension NOPROJ: `" — pension AFC isn't projecting raises with the current inputs"`
+  - Vacation LASTDAY: `" due to the Last day of service above"` (verbatim reuse of pension's existing constant)
+- **Vacation lock trigger** — Confirmed: `lastDay` set + no raise dates in `(vacAsOf, lastDay]`. Independent of pension's `noRaisesApply`.
+- **Table visibility** — Decoupled from both checkboxes. Visible whenever the contractual fieldset is visible, full stop.
+- **`#raises-note` kept** — Even with the new pension suffix carrying the "isn't applying" half, the note's "raises *are* applying to vacation; here's how to enable pension" framing has unique value. Reworded in Stage 12.
 
-## Quick verification steps when resuming
+## Manual browser verification still owed
 
-1. `node --test tests/*.test.js` — should pass (75 tests).
-2. Open `index.html` with no params — both charts render empty frames; clicking either clear button is a no-op.
-3. Open `index.html` with both pension + vacation URL params — verify each clear button only clears its own scope; URL reflects the surviving fields.
-4. Toggle `#raises-na` (pension side) — vacation chart recomputes; once Stage 5 lands, the new notice appears/disappears in lockstep.
+Per resume-notes pattern from earlier in the session, all 75 unit tests pass after every completed stage but **no manual browser verification has been performed for Stages 1–8a**. When resuming, before pushing into Stage 8b/9+, run through the verification paths spelled out in `PLAN.md` per stage. Key smoke tests:
+
+1. `node --test tests/*.test.js` — should report 75 pass / 0 fail.
+2. Open `index.html` with no params — both charts render empty axes; both clear buttons no-op.
+3. Open `index.html` with both pension + vacation URL params — verify each clear button scopes correctly; URL reflects surviving fields.
+4. Bad URL params (e.g., `?vacHours=-5&memDate=invalid`) — pension error in top banner; vacation error in the vacation-scoped banner above `#group-vacation-input`.
+5. Toggle `#raises-na` — vacation chart recomputes; (current pre-Stage-9 state: passive vacation-side notice mirrors it). Post-Stage-9: vacation checkbox is independent and user-only.
+6. Set a `lastDay` that cuts off all raises — pension checkbox auto-locks with LASTDAY suffix.
+7. With a `mode: 'total'` plan (e.g., `noncontributory`) + manual AFC + vacation inputs — Stage 8a state: contractual fieldset visible, `#raises-note` shown, RAISES table visible. (Once Stage 10a lands: pension checkbox additionally locked + disabled + NOPROJ suffix.)
+
+## Pointers for the next session
+
+- Start by re-reading `PLAN.md` end-to-end — Stages 9–13 carry the detailed implementation steps and verification paths.
+- Per `feedback_stage_verification.md` in auto-memory: pause after each stage and wait for user OK.
+- Per `project_planning_files.md`: `PLAN.md` and this `RESUME.md` are ephemeral — delete when the final stage lands.
+- The user's earlier message about RAISES table visibility ("even when raises can't be applied to the pension graph, I kind of want the disabled raises table itself visible") is the key driver of Stages 10a + 10c. Don't quietly re-couple table visibility to lock state.

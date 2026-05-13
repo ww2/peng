@@ -257,7 +257,7 @@
       border: 1px solid #c00;
       border-radius: 3px;
       padding: 0.4rem 0.75rem;
-      margin-bottom: 0.75rem;
+      margin: 0.75rem 0;
     }
     .url-error-banner ul { margin: 0.25rem 0 0 1.25rem; padding: 0; }
     .url-error-banner li { margin: 0.1rem 0; }
@@ -487,6 +487,10 @@
     <legend>Contractual adjustments</legend>
     <div class="form-rows">
 
+      <div class="form-row" id="raises-note" style="font-size:0.8rem; color:#666; font-style:italic; max-width:36rem;" hidden>
+        These raises are projected through the vacation hourly rate. They aren't applied to your pension AFC with the current inputs — load paystubs above to project them through pension as well.
+      </div>
+
       <div class="form-row" id="raises-table-row" style="align-items: flex-start;">
         <span class="form-label">Projected raises</span>
         <table id="raises-table">
@@ -589,6 +593,10 @@
   </details>
 
   <!-- ── Vacation section (independent of pension calculation) ─ -->
+  <div id="vac-error-banner" class="url-error-banner" hidden>
+    <strong>Issues:</strong>
+    <ul></ul>
+  </div>
   <fieldset id="group-vacation-input">
     <legend>Vacation payout</legend>
     <div class="form-rows">
@@ -608,10 +616,8 @@
         </div>
       </div>
 
-      <div class="form-row" style="margin-bottom:0.25rem;">
-        <label style="font-size:0.8rem; display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
-          <input type="checkbox" id="vac-raises-na"> <span>Projected raises do not apply</span>
-        </label>
+      <div id="vac-raises-na-notice" class="form-row" style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;" hidden>
+        Projected raises do not apply (set in pension section)
       </div>
 
     </div>
@@ -684,6 +690,7 @@
     const raisesTableRowEl = document.getElementById('raises-table-row');
     const raisesTableBodyEl = document.getElementById('raises-table-body');
     const contractualGroupEl = document.getElementById('group-contractual-input');
+    const raisesNoteEl       = document.getElementById('raises-note');
     const manualAfcEl      = document.getElementById('manual-afc');
 
     // Render the projected-raises table from RAISES (defined in lib/pension.js)
@@ -729,7 +736,7 @@
     const vacAsOfEl         = document.getElementById('vac-as-of');
     const vacRateEl         = document.getElementById('vac-rate');
     const vacHourlyRateEl   = document.getElementById('vac-hourly-rate');
-    const vacRaisesNaEl     = document.getElementById('vac-raises-na');
+    const vacRaisesNaNoticeEl = document.getElementById('vac-raises-na-notice');
     const vacGraphBtn       = document.getElementById('vac-graph-btn');
     const vacClearBtn       = document.getElementById('vac-clear-btn');
     const vacStatusLine     = document.getElementById('vac-status-line');
@@ -739,6 +746,8 @@
     const debugPanelEl     = document.getElementById('debug-panel');
     const urlErrorBanner   = document.getElementById('url-error-banner');
     const urlErrorBannerList = urlErrorBanner.querySelector('ul');
+    const vacErrorBanner     = document.getElementById('vac-error-banner');
+    const vacErrorBannerList = vacErrorBanner.querySelector('ul');
 
     // ── Plan configs ─────────────────────────────────────────────
     // Plan logic (PLAN_CONFIGS, TIER_BOUNDARY, derivePlanKey, RAISES,
@@ -1520,7 +1529,7 @@
         vacRate:       parseFloat(vacRateEl.value) || 14,
         vacHourlyRate: parseFloat(vacHourlyRateEl.value),
         lastDayOfSvc,
-        raisesNA:      vacRaisesNaEl.checked,
+        raisesNA:      raisesNaEl.checked,
       });
       window._debug.lastVacationResult = result;
       drawVacationChart(result);
@@ -1531,33 +1540,18 @@
       vacGraphBtn.disabled = !ok;
       if (ok) runVacationCalculate();
       else drawVacationChart(null);
+      updateContractualVisibility();
     }
 
-    // Bidirectional sync between the pension-side and vacation-side
-    // "Projected raises do not apply" checkboxes. Setting one programmatically
-    // dispatches a 'change' event on the other so the rest of each side's
-    // existing change handlers (visibility toggle, pension recalculate,
-    // updateReloadLink, etc.) fire on both as if the user had clicked them.
-    // The recursion guard prevents the dispatched event from re-entering.
-    let raisesNaSyncing = false;
-    function syncRaisesNaFrom(source) {
-      if (raisesNaSyncing) return;
-      raisesNaSyncing = true;
-      const target = source === raisesNaEl ? vacRaisesNaEl : raisesNaEl;
-      if (target.checked !== source.checked) {
-        target.checked = source.checked;
-        target.dispatchEvent(new Event('change'));
-      }
-      raisesNaSyncing = false;
+    // One-way: the pension-side `#raises-na` checkbox is the single source of
+    // truth. The vacation section shows a passive notice mirroring its state.
+    // Call this after any programmatic mutation of `raisesNaEl.checked`
+    // (applyRaisesNALock, runClear) since assignment doesn't fire `change`.
+    function updateVacRaisesNotice() {
+      vacRaisesNaNoticeEl.hidden = !raisesNaEl.checked;
     }
-    // Pension-side click: sync to vac (which auto-fires the vac chart via the
-    // dispatched change event). Pension-side recalc happens via the existing
-    // raisesNaEl 'change' listener registered later.
-    raisesNaEl.addEventListener('change', () => syncRaisesNaFrom(raisesNaEl));
-    // Vac-side click: sync to pension (firing pension recalc via dispatched
-    // change), then run own-side vacation recalc.
-    vacRaisesNaEl.addEventListener('change', () => {
-      syncRaisesNaFrom(vacRaisesNaEl);
+    raisesNaEl.addEventListener('change', () => {
+      updateVacRaisesNotice();
       maybeCalculateVacation();
     });
 
@@ -1725,7 +1719,7 @@
       applyRaisesNALock(noRaisesApply);
       const raisesNA     = raisesNaEl.checked;
       const showRaises   = raisesProjected && !raisesNA;
-      setContractualVisible(raisesProjected);
+      updateContractualVisibility();
       drawChart(series, { hasSL, isSeparated, showRaises });
       drawSeriesTable(series, { hasSL, showRaises });
     }
@@ -1773,15 +1767,13 @@
       prevPlanValue              = '';
       prevMemDateValue           = '';
       statusLine.textContent     = '';
-      setContractualVisible(false);
+      updateContractualVisibility();
       graphBtn.disabled          = true;
       memDateEl.classList.remove('input-error');
       setMemDateBannerEntry(null);
 
-      // Pension-side raises-NA checkbox (the vacation-side mirror is reset
-      // automatically via the bidirectional sync — Stage 5/6 will replace the
-      // vacation-side checkbox with a passive notice).
       raisesNaEl.checked = false;
+      updateVacRaisesNotice();
 
       updateReloadLink();
       // Strip URL params now that the form is empty and cache toggle is off —
@@ -1789,7 +1781,11 @@
       history.replaceState(null, '', buildReloadUrl());
       drawChart();
       drawSeriesTable(null);
-      drawVacationChart(null);
+      // Vacation chart recomputes against the reset shared state (stillActive
+      // → default true, raisesNa → false). If the user left vacation inputs
+      // populated, the chart redraws; otherwise maybeCalculateVacation falls
+      // through to the empty-frame draw.
+      maybeCalculateVacation();
     }
 
     clearBtn.addEventListener('click', runClear);
@@ -1800,6 +1796,7 @@
       vacGraphBtn.disabled      = true;
       vacStatusLine.textContent = '';
       drawVacationChart(null);
+      updateContractualVisibility();
       updateReloadLink();
       history.replaceState(null, '', buildReloadUrl());
     }
@@ -1927,8 +1924,6 @@
         raisesNaEl.dataset.forced = '1';
         raisesNaEl.checked        = true;
         raisesNaEl.disabled       = true;
-        vacRaisesNaEl.checked     = true;
-        vacRaisesNaEl.disabled    = true;
         raisesNaTextEl.textContent = RAISES_NA_BASE_LABEL + RAISES_NA_LASTDAY_SUFFIX;
         raisesTableRowEl.hidden   = true;
         changed = true;
@@ -1936,22 +1931,37 @@
         const prior = raisesNaEl.dataset.prior === '1';
         raisesNaEl.checked        = prior;
         raisesNaEl.disabled       = false;
-        vacRaisesNaEl.checked     = prior;
-        vacRaisesNaEl.disabled    = false;
         raisesNaTextEl.textContent = RAISES_NA_BASE_LABEL;
         raisesTableRowEl.hidden   = raisesNaEl.checked;
         delete raisesNaEl.dataset.forced;
         delete raisesNaEl.dataset.prior;
         changed = true;
       }
-      if (changed) maybeCalculateVacation();
+      if (changed) {
+        updateVacRaisesNotice();
+        maybeCalculateVacation();
+      }
     }
 
-    // Show the contractual-adjustments fieldset only when a paystub stream
-    // is driving the calculation. Manual-AFC entries can't be projected
-    // forward, so the raises table and override checkbox are meaningless.
-    function setContractualVisible(visible) {
-      contractualGroupEl.hidden = !visible;
+    // Visibility of the contractual-adjustments fieldset is driven by two
+    // independent consumers of the RAISES schedule: the pension chart (only
+    // when calculateSeries actually projects raises through AFC) and the
+    // vacation chart (always uses raises to compound the hourly rate when it
+    // can graph). When only vacation is driving visibility, surface a note
+    // explaining that pension AFC isn't projecting raises with the current
+    // inputs. `pensionUsesRaises` mirrors the `raisesProjected` gate inside
+    // `runCalculate` (a paystub stream OR a regular-mode synthetic stream
+    // built from manual AFC); recomputed locally so this helper can run from
+    // any path.
+    function updateContractualVisibility() {
+      const planKey    = derivePlanKey(planEl.value, memDateEl.value);
+      const planConfig = PLAN_CONFIGS[planKey];
+      const manualAfc  = parseFloat(manualAfcEl.value);
+      const pensionUsesRaises = lastStubs.length > 0
+        || (planConfig?.mode === 'regular' && manualAfc > 0);
+      const vacationActive    = canCalculateVacation();
+      contractualGroupEl.hidden = !(pensionUsesRaises || vacationActive);
+      raisesNoteEl.hidden       = !(vacationActive && !pensionUsesRaises);
     }
 
     function syncLastDayState() {
@@ -2095,8 +2105,8 @@
       const SUPPORTED_PARAMS = ['plan','dob','memDate','svcYears','svcMonths','ncSvcYears','ncSvcMonths','svcAsOf','lastDay','afc','slHours','slAsOf','slRate','vacHours','vacAsOf','vacRate','vacHourlyRate','cache'];
       const PLAN_VALUES = ['hybrid','contributory','noncontributory'];
       const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-      const banner = urlErrorBanner;
-      const bannerList = urlErrorBannerList;
+      const pensionTarget  = { banner: urlErrorBanner, list: urlErrorBannerList };
+      const vacationTarget = { banner: vacErrorBanner, list: vacErrorBannerList };
 
       function isValidIsoDate(s) {
         if (!ISO_DATE_RE.test(s)) return false;
@@ -2105,10 +2115,10 @@
         return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
       }
 
-      function addError(msg, elOrEls) {
+      function addError(msg, elOrEls, target = pensionTarget) {
         const li = document.createElement('li');
         li.textContent = msg;
-        bannerList.appendChild(li);
+        target.list.appendChild(li);
         const els = elOrEls ? (Array.isArray(elOrEls) ? elOrEls : [elOrEls]) : [];
         if (!els.length) return;
         const clear = () => {
@@ -2118,7 +2128,7 @@
             el.removeEventListener('change', clear);
           });
           li.remove();
-          if (!bannerList.children.length) banner.hidden = true;
+          if (!target.list.children.length) target.banner.hidden = true;
         };
         els.forEach(el => {
           el.classList.add('input-error');
@@ -2136,20 +2146,21 @@
         else addError(`unknown plan "${v}" — pick from the dropdown`, planEl);
       }
 
-      // Date fields
+      // Date fields. Vacation-scoped fields route to the vacation banner; the
+      // rest fall through to the default pension banner.
       const dateFields = [
         ['dob',     dobEl],
         ['memDate', memDateEl],
         ['svcAsOf', svcAsOfEl],
         ['lastDay', lastDayEl],
         ['slAsOf',  slAsOfEl],
-        ['vacAsOf', vacAsOfEl],
+        ['vacAsOf', vacAsOfEl, vacationTarget],
       ];
-      for (const [key, el] of dateFields) {
+      for (const [key, el, target] of dateFields) {
         if (!p.has(key) || p.get(key) === '') continue;
         const v = p.get(key);
         if (isValidIsoDate(v)) el.value = v;
-        else addError(`invalid date "${v}" for ${key} — expected YYYY-MM-DD`, el);
+        else addError(`invalid date "${v}" for ${key} — expected YYYY-MM-DD`, el, target);
       }
 
       // Integer fields
@@ -2167,22 +2178,23 @@
         else addError(`invalid ${key} "${v}" — expected integer ${min}–${max}`, el);
       }
 
-      // Numeric fields (positive)
+      // Numeric fields (positive). Vacation-scoped entries route to the
+      // vacation banner; the rest fall through to the default pension banner.
       const numFields = [
-        ['afc',           manualAfcEl,     false],  // strictly > 0
-        ['slHours',       slHoursEl,       true],   // ≥ 0
-        ['slRate',        slRateEl,        false],  // strictly > 0
-        ['vacHours',      vacHoursEl,      true],   // ≥ 0
-        ['vacRate',       vacRateEl,       false],  // strictly > 0
-        ['vacHourlyRate', vacHourlyRateEl, false],  // strictly > 0
+        ['afc',           manualAfcEl,     false],                    // strictly > 0
+        ['slHours',       slHoursEl,       true],                     // ≥ 0
+        ['slRate',        slRateEl,        false],                    // strictly > 0
+        ['vacHours',      vacHoursEl,      true,  vacationTarget],    // ≥ 0
+        ['vacRate',       vacRateEl,       false, vacationTarget],    // strictly > 0
+        ['vacHourlyRate', vacHourlyRateEl, false, vacationTarget],    // strictly > 0
       ];
-      for (const [key, el, allowZero] of numFields) {
+      for (const [key, el, allowZero, target] of numFields) {
         if (!p.has(key) || p.get(key) === '') continue;
         const v = p.get(key);
         const n = parseFloat(v);
         const ok = !isNaN(n) && (allowZero ? n >= 0 : n > 0);
         if (ok) el.value = v;
-        else addError(`invalid ${key} "${v}" — expected ${allowZero ? 'non-negative' : 'positive'} number`, el);
+        else addError(`invalid ${key} "${v}" — expected ${allowZero ? 'non-negative' : 'positive'} number`, el, target);
       }
 
       // lastDay implies separated; also serves as svcAsOf shim if URL omitted svcAsOf.
@@ -2223,7 +2235,8 @@
         }
       }
 
-      if (bannerList.children.length) banner.hidden = false;
+      if (pensionTarget.list.children.length)  pensionTarget.banner.hidden  = false;
+      if (vacationTarget.list.children.length) vacationTarget.banner.hidden = false;
 
       prevPlanValue             = planEl.value;
       prevMemDateValue          = memDateEl.value;
