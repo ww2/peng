@@ -2763,7 +2763,7 @@
           .attr('fill', 'white').attr('stroke', CHART.colorMinor).attr('rx', 3);
         const tipText  = tipLabel.append('text')
           .attr('font-family', CHART.font).attr('font-size', '0.75rem')
-          .attr('fill', CHART.colorTitle).attr('dominant-baseline', 'hanging');
+          .attr('fill', CHART.colorTitle);
 
         // Transparent overlay — must be last so it sits on top for event capture.
         g.append('rect')
@@ -2852,14 +2852,20 @@
             // overlaps the COLA staircase or any pension curve. The crosshair
             // dots already identify the hovered point on each curve.
             const pad = 6;
+            const topPad = 4;
+            const descenderPad = 3;
+            // Measure with text at y=0 so bb.y + bb.height equals the descender
+            // depth below the alphabetic baseline — browser-independent.
+            tipText.attr('y', 0);
             const bb  = tipText.node().getBBox();
+            const descent = bb.y + bb.height;
             const lw  = bb.width  + pad * 2;
-            const lh  = bb.height + pad * 2;
+            const lh  = bb.height + topPad + descenderPad;
             const lx  = (iW - lw) / 2;
             const ly  = 0;
 
             tipRect.attr('x', lx).attr('y', ly).attr('width', lw).attr('height', lh);
-            tipText.attr('x', lx + pad).attr('y', ly + pad);
+            tipText.attr('x', lx + pad).attr('y', ly + lh - descenderPad - descent);
             tipText.selectAll('tspan').attr('x', lx + pad);
 
             tip.attr('display', null);
@@ -3127,7 +3133,7 @@
           .attr('fill', 'white').attr('stroke', CHART.colorMinor).attr('rx', 3);
         const tipText = tipLabel.append('text')
           .attr('font-family', CHART.font).attr('font-size', '0.75rem')
-          .attr('fill', CHART.colorTitle).attr('dominant-baseline', 'hanging');
+          .attr('fill', CHART.colorTitle);
 
         g.append('rect')
           .attr('width', iW).attr('height', iH)
@@ -3174,13 +3180,19 @@
               .text(`${pt.retDate.getFullYear()} ${MONTHS[pt.retDate.getMonth()]} ${pt.retDate.getDate()} — $${fmt(closest.value)}${closest.label}`);
 
             const pad = 6;
+            const topPad = 4;
+            const descenderPad = 3;
+            // Reset y=0 so bb.y + bb.height equals descender depth below the
+            // alphabetic baseline — browser-independent.
+            tipText.attr('y', 0);
             const bb = tipText.node().getBBox();
+            const descent = bb.y + bb.height;
             const lw = bb.width + pad * 2;
-            const lh = bb.height + pad * 2;
+            const lh = bb.height + topPad + descenderPad;
             const lx = (iW - lw) / 2;
             const ly = 0;
             tipRect.attr('x', lx).attr('y', ly).attr('width', lw).attr('height', lh);
-            tipText.attr('x', lx + pad).attr('y', ly + pad);
+            tipText.attr('x', lx + pad).attr('y', ly + lh - descenderPad - descent);
 
             tip.attr('display', null);
           })
