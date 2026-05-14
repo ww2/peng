@@ -1,6 +1,4 @@
 # vac
-Under 'Earnings data' the 'Regular avg earnings' output is a bit confusing -- please replace that with 'Current monthly earnings as of', using the date and value from the most recent complete pay period.
-
 Ask about feasability of auto-populating the vacation-related hourly
 rate and as-of date based on the date of the last scanned PDF paystub
 (either immediately post-scan, or populating from the cache when the

@@ -213,7 +213,7 @@
     }
 
     /* ── AFC computed display ── */
-    #afc-computed, #afc-date-range {
+    #afc-computed, #afc-date-range, #regular-earnings {
       margin-top: 0.5rem;
       font-size: 0.85rem;
       min-height: 1.2em;
@@ -1211,12 +1211,16 @@
     }
 
     // ── Regular earnings display ─────────────────────────────────
+    // Shows the most recent complete calendar month's regular earnings.
+    // buildPaystubStream truncates to the last month-end-aligned stub, so
+    // its last entry is the latest fully-covered month.
     function updateRegularEarningsDisplay() {
-      const lastWin = lastWindows[lastWindows.length - 1];
-      if (!lastWin) return;
-      const regularAvg = lastWin.stubs.reduce((sum, s) => sum + scoreStub(s, 'regular'), 0) / 12;
+      const stream = window._debug.lastPaystubStream;
+      if (!stream.length) return;
+      const last = stream[stream.length - 1];
+      const endOfMonth = new Date(last.month.getFullYear(), last.month.getMonth() + 1, 0);
       regularEarningsEl.textContent =
-        `Regular avg earnings (${fmtDate(lastWin.start)} – ${fmtDate(lastWin.endIncl)}): $${fmtMoney(regularAvg)}/mo`;
+        `Current monthly earnings as of ${fmtDate(endOfMonth)}: $${fmtMoney(last.regular)}/mo`;
     }
 
     // ── AFC computation ──────────────────────────────────────────
