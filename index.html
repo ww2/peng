@@ -305,7 +305,7 @@
     #vac-chart-svg {
       display: block;
       width: 100%;
-      height: 320px;
+      height: 520px;
       border: 1px solid #ddd;
       background: #fafafa;
       margin-top: 0.4rem;
@@ -656,9 +656,9 @@
       colorRaises           : '#7700cc',
       colorRaisesSLCurrent  : '#aa33dd',
       colorRaisesSLProjected: '#cc88ee',
-      // Vacation curve colors (orange family — distinct from blue/purple/green)
-      colorVacationCurrent: '#cc4400',
-      colorVacationMax    : '#ee8833',
+      // Vacation curves reuse the pension palette so the two charts share a
+      // visual vocabulary: "current" = primary; "accrued, no spending" =
+      // dashed SL-projected; raise variants reuse the pension raise colors.
       colorTitle     : '#222',
       colorCrosshair : '#aaa',
     };
@@ -2871,11 +2871,14 @@
     // ── Vacation chart ──────────────────────────────────────────────
     // Renders the standalone vacation-payout chart. Consumes the result
     // shape returned by buildVacationSeries:
-    //   { separated: false, rows: [{ retDate, currentPayout, maxPayout }, ...], lastDayOfSvc }
+    //   { separated: false, rows: [{ retDate, currentPayout, maxPayout,
+    //     currentPayoutWithRaises, maxPayoutWithRaises }, ...], lastDayOfSvc }
     //   { separated: true, separatedOn, finalHours, finalRate, finalPayout }
     // Linear time x-axis (no compression / no eligibility shading), monthly
     // staircase via d3.curveStepAfter. When `separated` is true, the chart
     // is hidden and `#vac-separated-message` is shown in its place.
+    // Raise-variant curves render only when any row's with-raise pair lifts
+    // above its no-raise pair (mirrors the pension chart's `showRaises` gate).
     function drawVacationChart(result = null) {
       const svg = d3.select('#vac-chart-svg');
       svg.selectAll('*').remove();
@@ -2907,6 +2910,11 @@
       // there are no rows.
       const rows = (result && result.rows) ? result.rows : [];
       const hasRows = rows.length > 0;
+      // Raise curves are suppressed when the caller passed `raisesNA: true`,
+      // even though the data still carries lifted values (kept around so the
+      // y-axis ceiling stays stable across the toggle).
+      const showRaises = hasRows && !result.raisesNA && rows.some(r =>
+        r.maxPayoutWithRaises > r.maxPayout || r.currentPayoutWithRaises > r.currentPayout);
 
       const W = node.clientWidth;
       const H = node.clientHeight;
@@ -2924,8 +2932,14 @@
       const xMax = hasRows ? rows[rows.length - 1].retDate : fallbackXMax;
       const xScale = d3.scaleTime().domain([xMin, xMax]).range([0, iW]);
 
-      const vacMax = hasRows ? Math.max(0, ...rows.map(r => r.maxPayout)) : 0;
-      const yMax = hasRows ? Math.max(1000, Math.ceil(vacMax / 1000) * 1000) : 50000;
+      // Y-axis top covers every variant curve so nothing gets clipped, and is
+      // always driven by the with-raise pair (which buildVacationSeries
+      // computes regardless of `raisesNA`) so toggling the checkbox doesn't
+      // resize the axis. Rounded up to the next 10k for a stable tick scale.
+      const vacMax = hasRows
+        ? Math.max(0, ...rows.flatMap(r => [r.maxPayout, r.maxPayoutWithRaises]))
+        : 0;
+      const yMax = hasRows ? Math.max(10000, Math.ceil(vacMax / 10000) * 10000) : 50000;
       const yScale = d3.scaleLinear().domain([0, yMax]).range([iH, 0]);
 
       // ── X axis: yearly major ticks; quarterly minor ticks for short windows
@@ -2972,9 +2986,10 @@
         .attr('font-family', CHART.font).attr('font-size', '0.75rem').attr('fill', CHART.colorLabel)
         .text(d => d.getFullYear());
 
-      // ── Y axis
+      // ── Y axis — 5k tick granularity (scales to next 5k multiple when
+      // ten 5k ticks would no longer fit the range).
       const yStep = hasRows
-        ? Math.max(1000, Math.ceil(yMax / 6 / 1000) * 1000)
+        ? Math.max(5000, Math.ceil(yMax / 10 / 5000) * 5000)
         : 10000;
       const yMajorVals = d3.range(0, yMax + 1, yStep);
       g.append('g').selectAll('line').data(yMajorVals).join('line')
@@ -2995,18 +3010,27 @@
       if (hasRows) {
         svg.append('defs').append('clipPath').attr('id', 'vac-plot-clip')
           .append('rect').attr('width', iW).attr('height', iH);
-        const makeVacCurve = (accessor, color) => {
+        const makeVacCurve = (accessor, color, dashArray = null) => {
           const line = d3.line()
             .curve(d3.curveStepAfter)
             .x(d => xScale(d.retDate))
             .y(d => yScale(accessor(d)));
-          g.append('g').attr('clip-path', 'url(#vac-plot-clip)')
+          const path = g.append('g').attr('clip-path', 'url(#vac-plot-clip)')
             .append('path').datum(rows)
             .attr('fill', 'none').attr('stroke', color).attr('stroke-width', 1.5)
             .attr('d', line);
+          if (dashArray) path.attr('stroke-dasharray', dashArray);
         };
-        makeVacCurve(d => d.maxPayout,     CHART.colorVacationMax);
-        makeVacCurve(d => d.currentPayout, CHART.colorVacationCurrent);
+        // Raise-variant pair (back) — drawn first so the no-raise primary
+        // pair sits on top where the two pairs overlay (i.e. before any raise
+        // has lifted the rate). "Accrued, no spending" curves are dashed,
+        // matching the pension chart's "projected sick leave" treatment.
+        if (showRaises) {
+          makeVacCurve(d => d.maxPayoutWithRaises,     CHART.colorRaisesSLProjected, '4,3');
+          makeVacCurve(d => d.currentPayoutWithRaises, CHART.colorRaises);
+        }
+        makeVacCurve(d => d.maxPayout,     CHART.colorSLProjected, '4,3');
+        makeVacCurve(d => d.currentPayout, CHART.colorPrimary);
       }
 
       // ── Axis baselines
@@ -3052,35 +3076,32 @@
         .text('Vacation Payout ($)');
 
       // ── Legend below the x-axis label
-      const legendItems = [
-        { color: CHART.colorVacationMax,     label: 'vacation payout (accrued, no spending)' },
-        { color: CHART.colorVacationCurrent, label: 'vacation payout (current)'           },
+      // Fixed 2-column layout: "current" in col 0, "accrued, no spending" in
+      // col 1. Raise pair lives on the row below and column-aligns with the
+      // no-raise pair above.
+      const legRows = [
+        [
+          { color: CHART.colorPrimary,           dash: null,  label: 'vacation payout (current)'              },
+          { color: CHART.colorSLProjected,       dash: '4,3', label: 'vacation payout (accrued, no spending)' },
+        ],
+        ...(showRaises ? [[
+          { color: CHART.colorRaises,            dash: null,  label: '+ projected raises'                },
+          { color: CHART.colorRaisesSLProjected, dash: '4,3', label: '+ raises (accrued, no spending)'   },
+        ]] : []),
       ];
-      const swW = 20, gap1 = 5, gap2 = 36, charW = 8;
-      const entryW = e => swW + gap1 + e.label.length * charW + gap2;
-      const legRows = [];
-      let legRow = [], rowUsed = 0;
-      legendItems.forEach(e => {
-        const w = entryW(e);
-        if (legRow.length > 0 && rowUsed + w - gap2 > iW) {
-          legRows.push(legRow);
-          legRow = [{ ...e, x: 0 }];
-          rowUsed = w;
-        } else {
-          legRow.push({ ...e, x: rowUsed });
-          rowUsed += w;
-        }
-      });
-      if (legRow.length) legRows.push(legRow);
+      const swW = 20, gap1 = 5;
+      const colW = iW / 2;
+      legRows.forEach(row => row.forEach((e, ci) => { e.x = ci * colW; }));
       const rowH = 18, legStartY = iH + 65;
       const leg = g.append('g');
       legRows.forEach((rowItems, ri) => {
         const y = legStartY + ri * rowH;
         rowItems.forEach(e => {
-          leg.append('line')
+          const ln = leg.append('line')
             .attr('x1', e.x).attr('x2', e.x + swW)
             .attr('y1', y).attr('y2', y)
             .attr('stroke', e.color).attr('stroke-width', 1.5);
+          if (e.dash) ln.attr('stroke-dasharray', e.dash);
           leg.append('text')
             .attr('x', e.x + swW + gap1).attr('y', y)
             .attr('dominant-baseline', 'middle')
@@ -3094,9 +3115,13 @@
         const bisect = d3.bisector(d => d.retDate).left;
         const tip = g.append('g').attr('display', 'none');
         tip.append('circle').attr('class', 'tip-vac-max')
-          .attr('r', 3.5).attr('fill', CHART.colorVacationMax);
+          .attr('r', 3.5).attr('fill', CHART.colorSLProjected);
         tip.append('circle').attr('class', 'tip-vac-current')
-          .attr('r', 3.5).attr('fill', CHART.colorVacationCurrent);
+          .attr('r', 3.5).attr('fill', CHART.colorPrimary);
+        tip.append('circle').attr('class', 'tip-vac-max-raises')
+          .attr('r', 3.5).attr('fill', CHART.colorRaisesSLProjected).attr('display', 'none');
+        tip.append('circle').attr('class', 'tip-vac-current-raises')
+          .attr('r', 3.5).attr('fill', CHART.colorRaises).attr('display', 'none');
         const tipLabel = tip.append('g');
         const tipRect = tipLabel.append('rect')
           .attr('fill', 'white').attr('stroke', CHART.colorMinor).attr('rx', 3);
@@ -3108,7 +3133,7 @@
           .attr('width', iW).attr('height', iH)
           .attr('fill', 'none').attr('pointer-events', 'all')
           .on('mousemove', function(event) {
-            const [mx] = d3.pointer(event);
+            const [mx, my] = d3.pointer(event);
             const hoverDate = xScale.invert(mx);
             let idx = bisect(rows, hoverDate);
             if (idx >= rows.length) idx = rows.length - 1;
@@ -3122,16 +3147,31 @@
               .attr('cx', px).attr('cy', yScale(pt.maxPayout));
             tip.select('.tip-vac-current')
               .attr('cx', px).attr('cy', yScale(pt.currentPayout));
+            tip.select('.tip-vac-max-raises')
+              .attr('cx', showRaises ? px : 0).attr('cy', showRaises ? yScale(pt.maxPayoutWithRaises) : 0)
+              .attr('display', showRaises ? null : 'none');
+            tip.select('.tip-vac-current-raises')
+              .attr('cx', showRaises ? px : 0).attr('cy', showRaises ? yScale(pt.currentPayoutWithRaises) : 0)
+              .attr('display', showRaises ? null : 'none');
+
+            // Pick the curve closest to the cursor's Y position — single
+            // colored label, matching the pension chart's tooltip behavior.
+            const candidates = [
+              { value: pt.maxPayout,     label: ' (accrued)', color: CHART.colorSLProjected },
+              { value: pt.currentPayout, label: ' (current)', color: CHART.colorPrimary     },
+              ...(showRaises ? [
+                { value: pt.maxPayoutWithRaises,     label: ' (accrued, + raises)', color: CHART.colorRaisesSLProjected },
+                { value: pt.currentPayoutWithRaises, label: ' (current, + raises)', color: CHART.colorRaises            },
+              ] : []),
+            ];
+            const closest = candidates.reduce((best, c) =>
+              Math.abs(yScale(c.value) - my) < Math.abs(yScale(best.value) - my) ? c : best
+            );
 
             const fmt = v => Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
             tipText.selectAll('tspan').remove();
-            tipText.append('tspan')
-              .text(`${pt.retDate.getFullYear()} ${MONTHS[pt.retDate.getMonth()]} ${pt.retDate.getDate()} — `);
-            tipText.append('tspan').attr('fill', CHART.colorVacationMax)
-              .text(`$${fmt(pt.maxPayout)} (accrued)`);
-            tipText.append('tspan').text(', ');
-            tipText.append('tspan').attr('fill', CHART.colorVacationCurrent)
-              .text(`$${fmt(pt.currentPayout)} (current)`);
+            tipText.append('tspan').attr('fill', closest.color)
+              .text(`${pt.retDate.getFullYear()} ${MONTHS[pt.retDate.getMonth()]} ${pt.retDate.getDate()} — $${fmt(closest.value)}${closest.label}`);
 
             const pad = 6;
             const bb = tipText.node().getBBox();

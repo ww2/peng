@@ -1341,35 +1341,54 @@ test('buildVacationSeries', async (t) => {
     assert.equal(result.finalPayout, 884 * result.finalRate);
   });
 
-  await t.test('6. raisesNA: true suppresses raise compounding on hourly rate', () => {
+  await t.test('6. with-raise pair lifts above no-raise pair; raisesNA preserved on result but does not affect row math', () => {
     // Pick LDOS far enough out that at least one RAISES entry would land
-    // within the projection horizon when raises are enabled. Skip if no
-    // future raises remain (test stability across calendar drift).
+    // within the projection horizon. Skip if no future raises remain (test
+    // stability across calendar drift).
     const futureRaises = RAISES.filter(r => r.date > today);
     if (!futureRaises.length) return;
     const lastRaise = futureRaises[futureRaises.length - 1];
     const horizonEnd = new Date(lastRaise.date.getFullYear() + 1, lastRaise.date.getMonth(), 1);
 
-    const withRaises = buildVacationSeries({
+    const args = {
       vacHours: 0,
       vacAsOf:  new Date(today.getFullYear() - 1, today.getMonth(), 1),
       vacHourlyRate: 45,
       lastDayOfSvc: horizonEnd,
-      raisesNA: false,
-    });
-    const withoutRaises = buildVacationSeries({
-      vacHours: 0,
-      vacAsOf:  new Date(today.getFullYear() - 1, today.getMonth(), 1),
-      vacHourlyRate: 45,
-      lastDayOfSvc: horizonEnd,
-      raisesNA: true,
-    });
-    // Compare the last common row; with raises should be strictly higher.
-    const withLast    = withRaises.rows[withRaises.rows.length - 1];
-    const withoutLast = withoutRaises.rows[withoutRaises.rows.length - 1];
-    assert.equal(withLast.retDate.getTime(), withoutLast.retDate.getTime());
-    assert.ok(withLast.maxPayout > withoutLast.maxPayout,
-      `raises should lift maxPayout: with=${withLast.maxPayout} without=${withoutLast.maxPayout}`);
+    };
+    const onResult  = buildVacationSeries({ ...args, raisesNA: false });
+    const offResult = buildVacationSeries({ ...args, raisesNA: true });
+
+    // raisesNA echoed on the result so the chart can suppress raise curves
+    // without losing the values it needs for axis sizing.
+    assert.equal(onResult.raisesNA,  false);
+    assert.equal(offResult.raisesNA, true);
+
+    // With-raise pair lifts above no-raise pair regardless of `raisesNA`.
+    for (const result of [onResult, offResult]) {
+      const last = result.rows[result.rows.length - 1];
+      assert.ok(last.maxPayoutWithRaises > last.maxPayout,
+        `raises should lift maxPayoutWithRaises above maxPayout (raisesNA=${result.raisesNA})`);
+    }
+
+    // Row payouts match exactly between the two — raisesNA does not affect
+    // the math, only the flag carried on the result.
+    for (let i = 0; i < onResult.rows.length; i++) {
+      assert.deepEqual(
+        {
+          c:  onResult.rows[i].currentPayout,
+          m:  onResult.rows[i].maxPayout,
+          cR: onResult.rows[i].currentPayoutWithRaises,
+          mR: onResult.rows[i].maxPayoutWithRaises,
+        },
+        {
+          c:  offResult.rows[i].currentPayout,
+          m:  offResult.rows[i].maxPayout,
+          cR: offResult.rows[i].currentPayoutWithRaises,
+          mR: offResult.rows[i].maxPayoutWithRaises,
+        },
+      );
+    }
   });
 
   await t.test('7. vacHours = 0 produces a valid (flat-current, ramping-max) series', () => {

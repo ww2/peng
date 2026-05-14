@@ -1,14 +1,16 @@
 # vac
-On the vacation graph, when raises apply, create a separate pair of curves for that
-case just like we do for the pension graph, so that the raise curves can be easily
-visually compared against the non-raise curves.
+Change labels and legend labels on vacation graph, maybe
+current, current + accrued (no spending)
++ projected raises, + accrued and raises (no spending)
+
+Hover-related text is very off-center vertically in Safari, and appears a little off-center on Firefox.
+
+Under 'Earnings data' the 'Regular avg earnings' output is a bit confusing -- please replace that with 'Current monthly earnings as of', using the date and value from the most recent complete pay period.
 
 Ask about feasability of auto-populating the vacation-related hourly
 rate and as-of date based on the date of the last scanned PDF paystub
 (either immediately post-scan, or populating from the cache when the
 page loads iff the cache is populated and the 'use cache' flag is set)
-
-Under 'Earnings data' the 'Regular avg earnings' output is a bit confusing -- please replace that with 'Current monthly earnings as of', using the date and value from the most recent complete pay period.
 
 # caching
 The UI for cache-management is confusing, since there's a checkbox but clearing it doesn't *clear* the cache, it just prevents it from being used at the next reload; and the cache gets cleared as a side-effect of clearing the pension fields.  How would you recommend making the interaction of the UI and the cache easier to understand?
