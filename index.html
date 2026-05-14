@@ -858,6 +858,7 @@
         : '';
 
       updateRegularEarningsDisplay();
+      maybeAutofillVacHourlyRate({ force: !fromCache });
 
       const gaps = detectGaps(stubs);
       gapWarningsEl.innerHTML = '';
@@ -1221,6 +1222,21 @@
       const endOfMonth = new Date(last.month.getFullYear(), last.month.getMonth() + 1, 0);
       regularEarningsEl.textContent =
         `Current monthly earnings as of ${fmtDate(endOfMonth)}: $${fmtMoney(last.regular)}/mo`;
+    }
+
+    // Auto-derive the vacation hourly rate from the latest complete month's
+    // regular earnings, assuming a standard 4×40 working-hour month. With
+    // `force` (a manual picker re-scan), always overwrite; otherwise only
+    // fills when the field is empty so URL params and manual edits win.
+    const STANDARD_HOURS_PER_MONTH = 4 * 40;
+    function maybeAutofillVacHourlyRate({ force = false } = {}) {
+      if (!force && vacHourlyRateEl.value !== '') return;
+      const stream = window._debug.lastPaystubStream;
+      if (!stream.length) return;
+      const monthly = stream[stream.length - 1].regular;
+      if (!(monthly > 0)) return;
+      vacHourlyRateEl.value = (monthly / STANDARD_HOURS_PER_MONTH).toFixed(2);
+      maybeCalculateVacation();
     }
 
     // ── AFC computation ──────────────────────────────────────────
@@ -2933,13 +2949,17 @@
       const iH = H - margin.top  - margin.bottom;
       const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
 
-      // Empty-frame defaults: 4-year span centered on today, $0–$50k y-range
-      // with $10k increments. Mirrors the pension chart's empty-frame habit.
+      // Empty-frame defaults: today-2y as left edge. Floor the total span at
+      // 4 years so the chart always shows a meaningful future window even when
+      // LDOS would otherwise cut it shorter. Mirrors the pension chart's
+      // empty-frame habit.
       const today = todayInHST();
       const fallbackXMin = new Date(today.getFullYear() - 2, today.getMonth(), 1);
       const fallbackXMax = new Date(today.getFullYear() + 2, today.getMonth(), 1);
       const xMin = hasRows ? rows[0].retDate                 : fallbackXMin;
-      const xMax = hasRows ? rows[rows.length - 1].retDate : fallbackXMax;
+      const dataXMax = hasRows ? rows[rows.length - 1].retDate : fallbackXMax;
+      const minXMax = addMonths(xMin, 48);
+      const xMax = dataXMax < minXMax ? minXMax : dataXMax;
       const xScale = d3.scaleTime().domain([xMin, xMax]).range([0, iW]);
 
       // Y-axis top covers every variant curve so nothing gets clipped, and is

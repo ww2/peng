@@ -1,10 +1,6 @@
-# vac
-Ask about feasability of auto-populating the vacation-related hourly
-rate and as-of date based on the date of the last scanned PDF paystub
-(either immediately post-scan, or populating from the cache when the
-page loads iff the cache is populated and the 'use cache' flag is set)
-
 # caching
+When the cache is enabled, I always want to see the 'as of' date so I can see when it was last updated.
+
 The UI for cache-management is confusing, since there's a checkbox but clearing it doesn't *clear* the cache, it just prevents it from being used at the next reload; and the cache gets cleared as a side-effect of clearing the pension fields.  How would you recommend making the interaction of the UI and the cache easier to understand?
 
 # insecurity

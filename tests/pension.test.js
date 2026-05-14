@@ -1237,7 +1237,7 @@ test('buildVacationSeries', async (t) => {
   const today = todayInHST();
   const startMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
-  await t.test('1. active member, no LDOS → today → today+24mo, monthly rows + Dec 31 peaks', () => {
+  await t.test('1. active member, no LDOS → today → today+48mo, monthly rows + Dec 31 peaks', () => {
     const result = buildVacationSeries({
       vacHours: 400,
       vacAsOf:  new Date(2025, 0, 1),
@@ -1248,7 +1248,7 @@ test('buildVacationSeries', async (t) => {
     assert.equal(result.separated, false);
     assert.ok(result.rows.length > 0);
     assert.equal(result.rows[0].retDate.getTime(), startMonth.getTime());
-    const expectedEnd = addMonths(startMonth, 24);
+    const expectedEnd = addMonths(startMonth, 48);
     assert.equal(result.rows[result.rows.length - 1].retDate.getTime(), expectedEnd.getTime());
 
     // Month-1 rows are one month apart.
@@ -1276,8 +1276,8 @@ test('buildVacationSeries', async (t) => {
     }
   });
 
-  await t.test('2. future LDOS within 2y → horizon still extends to today+24mo', () => {
-    const ldos = addMonths(startMonth, 12);  // 1 year out
+  await t.test('2. future LDOS within 4y → horizon still extends to today+48mo', () => {
+    const ldos = addMonths(startMonth, 24);  // 2 years out
     const result = buildVacationSeries({
       vacHours: 400,
       vacAsOf:  new Date(2025, 0, 1),
@@ -1286,14 +1286,14 @@ test('buildVacationSeries', async (t) => {
     });
     assert.equal(result.separated, false);
     const lastRow = result.rows[result.rows.length - 1];
-    const expectedEnd = addMonths(startMonth, 24);
+    const expectedEnd = addMonths(startMonth, 48);
     assert.equal(lastRow.retDate.getTime(), expectedEnd.getTime(),
-      'LDOS within 2y should not shorten the horizon below today+2y');
+      'LDOS within 4y should not shorten the horizon below today+4y');
     assert.equal(result.lastDayOfSvc.getTime(), ldos.getTime());
   });
 
-  await t.test('3. future LDOS beyond 2y → horizon stops exactly at LDOS month', () => {
-    const ldos = addMonths(startMonth, 60);  // 5 years out
+  await t.test('3. future LDOS beyond 4y → horizon stops exactly at LDOS month', () => {
+    const ldos = addMonths(startMonth, 72);  // 6 years out
     const ldosMid = new Date(ldos.getFullYear(), ldos.getMonth(), 15);
     const result = buildVacationSeries({
       vacHours: 0,
@@ -1305,7 +1305,7 @@ test('buildVacationSeries', async (t) => {
     const lastRow = result.rows[result.rows.length - 1];
     const expectedEnd = new Date(ldos.getFullYear(), ldos.getMonth(), 1);
     assert.equal(lastRow.retDate.getTime(), expectedEnd.getTime(),
-      'LDOS > 2y out should cap horizon at LDOS month');
+      'LDOS > 4y out should cap horizon at LDOS month');
   });
 
   await t.test('4. already separated → short-circuit summary, no rows', () => {
