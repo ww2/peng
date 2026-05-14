@@ -487,10 +487,6 @@
     <legend>Contractual adjustments</legend>
     <div class="form-rows">
 
-      <div class="form-row" id="raises-note" style="font-size:0.8rem; color:#666; font-style:italic; max-width:36rem;" hidden>
-        These raises are projected through the vacation hourly rate. They aren't applied to your pension AFC with the current inputs — load paystubs above to project them through pension as well.
-      </div>
-
       <div class="form-row" id="raises-table-row" style="align-items: flex-start;">
         <span class="form-label">Projected raises</span>
         <table id="raises-table">
@@ -498,25 +494,17 @@
         </table>
       </div>
 
-      <div class="form-row" id="raises-applies-row" style="font-size: 0.7rem; color: #888;">
-        applies to BUs 01, 02, 04, 07, 08, 10
-      </div>
-
       <div class="form-row" style="margin-bottom:0.25rem;">
         <label style="font-size:0.8rem; display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
           <input type="checkbox" id="raises-na"> <span id="raises-na-text">Projected raises do not apply</span>
         </label>
       </div>
+      <div class="form-row" id="raises-applies-row" style="font-size: 0.7rem; color: #888;">
+        Will only be applicable for BUs 01, 02, 04, 07, 08, 10
+      </div>
 
     </div>
   </fieldset>
-  <script>
-    document.getElementById('raises-na').addEventListener('change', function() {
-      const hide = this.checked;
-      document.getElementById('raises-table-row').hidden = hide;
-      document.getElementById('raises-applies-row').hidden = hide;
-    });
-  </script>
 
   <!-- ── Group 3: Earnings data ───────────────────────────────── -->
   <fieldset id="group-earnings-input" disabled>
@@ -616,8 +604,13 @@
         </div>
       </div>
 
-      <div id="vac-raises-na-notice" class="form-row" style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;" hidden>
-        Projected raises do not apply (set in pension section)
+      <div class="form-row" style="margin-bottom:0.25rem;">
+        <label style="font-size:0.8rem; display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
+          <input type="checkbox" id="vac-raises-na"> <span id="vac-raises-na-text">Projected raises do not apply</span>
+        </label>
+      </div>
+      <div class="form-row" id="raises-applies-row" style="font-size: 0.7rem; color: #888;">
+        Will only be applicable for BUs 01, 02, 04, 07, 08, 10
       </div>
 
     </div>
@@ -687,10 +680,8 @@
     const stillActiveEl    = document.getElementById('still-active');
     const raisesNaEl       = document.getElementById('raises-na');
     const raisesNaTextEl   = document.getElementById('raises-na-text');
-    const raisesTableRowEl = document.getElementById('raises-table-row');
     const raisesTableBodyEl = document.getElementById('raises-table-body');
     const contractualGroupEl = document.getElementById('group-contractual-input');
-    const raisesNoteEl       = document.getElementById('raises-note');
     const manualAfcEl      = document.getElementById('manual-afc');
 
     // Render the projected-raises table from RAISES (defined in lib/pension.js)
@@ -736,7 +727,8 @@
     const vacAsOfEl         = document.getElementById('vac-as-of');
     const vacRateEl         = document.getElementById('vac-rate');
     const vacHourlyRateEl   = document.getElementById('vac-hourly-rate');
-    const vacRaisesNaNoticeEl = document.getElementById('vac-raises-na-notice');
+    const vacRaisesNaEl     = document.getElementById('vac-raises-na');
+    const vacRaisesNaTextEl = document.getElementById('vac-raises-na-text');
     const vacGraphBtn       = document.getElementById('vac-graph-btn');
     const vacClearBtn       = document.getElementById('vac-clear-btn');
     const vacStatusLine     = document.getElementById('vac-status-line');
@@ -1505,7 +1497,11 @@
       const ok = canCalculate();
       graphBtn.disabled = !ok;
       if (ok) runCalculate();
-      else { drawChart(); drawSeriesTable(null); }
+      else {
+        drawChart();
+        drawSeriesTable(null);
+        updateContractualVisibility();
+      }
     }
 
     // ── Vacation gate / runner ──────────────────────────────────
@@ -1529,7 +1525,7 @@
         vacRate:       parseFloat(vacRateEl.value) || 14,
         vacHourlyRate: parseFloat(vacHourlyRateEl.value),
         lastDayOfSvc,
-        raisesNA:      raisesNaEl.checked,
+        raisesNA:      vacRaisesNaEl.checked,
       });
       window._debug.lastVacationResult = result;
       drawVacationChart(result);
@@ -1538,22 +1534,16 @@
     function maybeCalculateVacation() {
       const ok = canCalculateVacation();
       vacGraphBtn.disabled = !ok;
+      applyVacRaisesNALock();
       if (ok) runVacationCalculate();
       else drawVacationChart(null);
       updateContractualVisibility();
     }
 
-    // One-way: the pension-side `#raises-na` checkbox is the single source of
-    // truth. The vacation section shows a passive notice mirroring its state.
-    // Call this after any programmatic mutation of `raisesNaEl.checked`
-    // (applyRaisesNALock, runClear) since assignment doesn't fire `change`.
-    function updateVacRaisesNotice() {
-      vacRaisesNaNoticeEl.hidden = !raisesNaEl.checked;
-    }
-    raisesNaEl.addEventListener('change', () => {
-      updateVacRaisesNotice();
-      maybeCalculateVacation();
-    });
+    // Pension and vacation each have their own independent `raises-na` checkbox.
+    // Toggling one does not affect the other — the two states are intentionally
+    // allowed to diverge.
+    vacRaisesNaEl.addEventListener('change', maybeCalculateVacation);
 
     // Auto-fire vacation chart on changes to its inputs and to the shared
     // lastDay/stillActive controls.
@@ -1716,10 +1706,10 @@
         && lastDayOfSvc !== null && eligible.length > 0
         && !series.some(d => d.pensionWithRaises != null
                           && d.pensionWithRaises > d.primaryPension);
-      applyRaisesNALock(noRaisesApply);
+      updateContractualVisibility();
+      applyRaisesNALock({ pensionUsesRaises: raisesProjected, noRaisesApply, planMode: planConfig?.mode });
       const raisesNA     = raisesNaEl.checked;
       const showRaises   = raisesProjected && !raisesNA;
-      updateContractualVisibility();
       drawChart(series, { hasSL, isSeparated, showRaises });
       drawSeriesTable(series, { hasSL, showRaises });
     }
@@ -1773,7 +1763,6 @@
       setMemDateBannerEntry(null);
 
       raisesNaEl.checked = false;
-      updateVacRaisesNotice();
 
       updateReloadLink();
       // Strip URL params now that the form is empty and cache toggle is off —
@@ -1793,6 +1782,7 @@
     function runClearVacation() {
       [vacHoursEl, vacAsOfEl, vacHourlyRateEl].forEach(el => { el.value = ''; });
       vacRateEl.value = '14';
+      vacRaisesNaEl.checked = false;
       vacGraphBtn.disabled      = true;
       vacStatusLine.textContent = '';
       drawVacationChart(null);
@@ -1911,35 +1901,88 @@
       return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     }
 
-    // When the last day of service falls before any scheduled raise can blend
-    // into AFC, the "raises do not apply" checkbox is forced on and disabled,
-    // and its label gains an explanatory suffix. The user's prior checkbox
-    // state is restored once the lock is released (e.g. on "Still active").
-    const RAISES_NA_BASE_LABEL = 'Projected raises do not apply';
-    const RAISES_NA_LASTDAY_SUFFIX = ' due to the Last day of service above';
-    function applyRaisesNALock(forced) {
-      let changed = false;
-      if (forced && raisesNaEl.dataset.forced !== '1') {
-        raisesNaEl.dataset.prior  = raisesNaEl.checked ? '1' : '0';
-        raisesNaEl.dataset.forced = '1';
-        raisesNaEl.checked        = true;
-        raisesNaEl.disabled       = true;
-        raisesNaTextEl.textContent = RAISES_NA_BASE_LABEL + RAISES_NA_LASTDAY_SUFFIX;
-        raisesTableRowEl.hidden   = true;
-        changed = true;
-      } else if (!forced && raisesNaEl.dataset.forced === '1') {
+    // The "raises do not apply" checkbox auto-locks for two reasons:
+    //   - NOPROJ: pension AFC isn't projecting raises with the current inputs
+    //     (no paystub stream loaded and not a regular-mode plan with manual AFC).
+    //     The NOPROJ suffix is mode-aware: for regular-mode plans, manual AFC
+    //     alone unlocks the projection, so the suffix points the user at the
+    //     AFC field; otherwise (total-mode plans or no plan yet) only paystubs
+    //     help, so the suffix points to the picker.
+    //   - LASTDAY: the last day of service falls before any scheduled raise can
+    //     blend into AFC, so the projection horizon is empty.
+    // Caller passes { pensionUsesRaises, noRaisesApply, planMode }; the lock
+    // derives a suffix (NOPROJ wins over LASTDAY when both could apply).
+    // dataset.prior captures the user's prior checkbox state only on the
+    // unlocked→locked transition; locked-NOPROJ ↔ locked-LASTDAY (and NOPROJ
+    // suffix swaps when the plan mode changes) just swap the suffix without
+    // touching prior. Release restores prior. Table visibility is intentionally
+    // decoupled — see updateContractualVisibility.
+    const RAISES_NA_BASE_LABEL            = 'Projected raises do not apply';
+    const RAISES_NA_LASTDAY_SUFFIX        = ' due to the Last day of service above';
+    const RAISES_NA_NOPROJ_PAYSTUB_SUFFIX = ' — load paystubs above to project raises through pension';
+    const RAISES_NA_NOPROJ_AFC_SUFFIX     = ' — enter monthly AFC below to project raises through pension';
+    function applyRaisesNALock({ pensionUsesRaises, noRaisesApply, planMode }) {
+      const noprojSuffix = planMode === 'regular'
+        ? RAISES_NA_NOPROJ_AFC_SUFFIX
+        : RAISES_NA_NOPROJ_PAYSTUB_SUFFIX;
+      const suffix = !pensionUsesRaises
+        ? noprojSuffix
+        : (noRaisesApply ? RAISES_NA_LASTDAY_SUFFIX : null);
+      const wasLocked = raisesNaEl.dataset.forced === '1';
+      if (suffix && !wasLocked) {
+        raisesNaEl.dataset.prior   = raisesNaEl.checked ? '1' : '0';
+        raisesNaEl.dataset.forced  = '1';
+        raisesNaEl.checked         = true;
+        raisesNaEl.disabled        = true;
+        raisesNaTextEl.textContent = RAISES_NA_BASE_LABEL + suffix;
+      } else if (suffix && wasLocked) {
+        raisesNaTextEl.textContent = RAISES_NA_BASE_LABEL + suffix;
+      } else if (!suffix && wasLocked) {
         const prior = raisesNaEl.dataset.prior === '1';
-        raisesNaEl.checked        = prior;
-        raisesNaEl.disabled       = false;
+        raisesNaEl.checked         = prior;
+        raisesNaEl.disabled        = false;
         raisesNaTextEl.textContent = RAISES_NA_BASE_LABEL;
-        raisesTableRowEl.hidden   = raisesNaEl.checked;
         delete raisesNaEl.dataset.forced;
         delete raisesNaEl.dataset.prior;
-        changed = true;
       }
-      if (changed) {
-        updateVacRaisesNotice();
-        maybeCalculateVacation();
+    }
+
+    // Vacation-side LASTDAY auto-lock. Independent of the pension lock since
+    // vacation has its own raise window (raises strictly after vacAsOf, on or
+    // before lastDayOfSvc) and its own checkbox. When `lastDay` is set and no
+    // scheduled raise falls in `(vacAsOf, lastDay]`, the vacation chart can't
+    // compound any raise into its hourly rate — force the checkbox on so the
+    // state is visible. Uses the same dataset.forced/prior preservation
+    // mechanic as the pension lock; suffix reuses RAISES_NA_LASTDAY_SUFFIX
+    // verbatim (`lastDay` lives in the pension form visually above this
+    // checkbox).
+    function applyVacRaisesNALock() {
+      const noVacLast = !canCalculateVacation()
+        || stillActiveEl.checked
+        || !lastDayEl.value
+        || !vacAsOfEl.value;
+      let forced;
+      if (noVacLast) {
+        forced = false;
+      } else {
+        const vacAsOf = parseIsoDate(vacAsOfEl.value);
+        const lastDay = parseIsoDate(lastDayEl.value);
+        forced = !RAISES.some(r => r.date > vacAsOf && r.date <= lastDay);
+      }
+      const wasLocked = vacRaisesNaEl.dataset.forced === '1';
+      if (forced && !wasLocked) {
+        vacRaisesNaEl.dataset.prior   = vacRaisesNaEl.checked ? '1' : '0';
+        vacRaisesNaEl.dataset.forced  = '1';
+        vacRaisesNaEl.checked         = true;
+        vacRaisesNaEl.disabled        = true;
+        vacRaisesNaTextEl.textContent = RAISES_NA_BASE_LABEL + RAISES_NA_LASTDAY_SUFFIX;
+      } else if (!forced && wasLocked) {
+        const prior = vacRaisesNaEl.dataset.prior === '1';
+        vacRaisesNaEl.checked         = prior;
+        vacRaisesNaEl.disabled        = false;
+        vacRaisesNaTextEl.textContent = RAISES_NA_BASE_LABEL;
+        delete vacRaisesNaEl.dataset.forced;
+        delete vacRaisesNaEl.dataset.prior;
       }
     }
 
@@ -1947,12 +1990,14 @@
     // independent consumers of the RAISES schedule: the pension chart (only
     // when calculateSeries actually projects raises through AFC) and the
     // vacation chart (always uses raises to compound the hourly rate when it
-    // can graph). When only vacation is driving visibility, surface a note
-    // explaining that pension AFC isn't projecting raises with the current
-    // inputs. `pensionUsesRaises` mirrors the `raisesProjected` gate inside
-    // `runCalculate` (a paystub stream OR a regular-mode synthetic stream
-    // built from manual AFC); recomputed locally so this helper can run from
-    // any path.
+    // can graph). `pensionUsesRaises` mirrors the `raisesProjected` gate
+    // inside `runCalculate` (a paystub stream OR a regular-mode synthetic
+    // stream built from manual AFC); recomputed locally so this helper can
+    // run from any path. Also drives the pension `raises-na` NOPROJ
+    // auto-lock so the lock stays current outside `runCalculate` (e.g. on
+    // incomplete pension forms). The LASTDAY-suffix branch is set only from
+    // `runCalculate`, where the real `noRaisesApply` is known — that call
+    // supersedes when it fires after this helper.
     function updateContractualVisibility() {
       const planKey    = derivePlanKey(planEl.value, memDateEl.value);
       const planConfig = PLAN_CONFIGS[planKey];
@@ -1961,14 +2006,14 @@
         || (planConfig?.mode === 'regular' && manualAfc > 0);
       const vacationActive    = canCalculateVacation();
       contractualGroupEl.hidden = !(pensionUsesRaises || vacationActive);
-      raisesNoteEl.hidden       = !(vacationActive && !pensionUsesRaises);
+      applyRaisesNALock({ pensionUsesRaises, noRaisesApply: false, planMode: planConfig?.mode });
     }
 
     function syncLastDayState() {
       if (stillActiveEl.checked) {
         lastDayEl.disabled = true;
         lastDayEl.value    = '';
-        applyRaisesNALock(false);
+        updateContractualVisibility();
       } else {
         lastDayEl.disabled = false;
         if (!lastDayEl.value) lastDayEl.value = svcAsOfEl.value || todayIso();

@@ -1,4 +1,18 @@
+Right now, a lot of CLAUDE.md is used to describe both the forms in index.html
+and the code in pension.js ; would it be more efficient to embed most of
+that explanatory material in those files directly, so that CLAUDE.md itself
+would contain fewer references which need to be updated every time the code
+gets changed during maintenance?
+
+# misc
+Look over the current code and let me know if there are code paths which
+lack sufficient automated tests.
+
 # vac
+On the vacation graph, when raises apply, create a separate pair of curves for that
+case just like we do for the pension graph, so that the raise curves can be easily
+visually compared against the non-raise curves.
+
 Ask about feasability of auto-populating the vacation-related hourly
 rate and as-of date based on the date of the last scanned PDF paystub
 (either immediately post-scan, or populating from the cache when the
