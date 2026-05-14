@@ -5,11 +5,14 @@ const {
   buildPaystubStream,
   buildSyntheticStream,
   projectAfcAtRetirement,
+  solveDP,
   vacationPayoutAt,
   buildVacationSeries,
   applyRaises,
   blendedBenefit,
   calculateSeries,
+  derivePlanKey,
+  sickLeaveToMonths,
   serviceAtMonth,
   primaryEligAge,
   primaryArfAge,
@@ -92,6 +95,220 @@ test('RAISES dates are TZ-stable', () => {
     assert.equal(RAISES[i].date.getMonth(),    m, `RAISES[${i}] month`);
     assert.equal(RAISES[i].date.getDate(),     d, `RAISES[${i}] day`);
   }
+});
+
+// ── derivePlanKey ───────────────────────────────────────────────────
+// Mediates dropdown value + memDate → internal PLAN_CONFIGS key. Tier
+// (post2012 vs pre2012) is derived from memDate against the 2012-07-01
+// boundary; noncontributory has no tier and ignores memDate.
+test('derivePlanKey', async (t) => {
+  await t.test('hybrid + post-2012 memDate → hybrid-post2012', () => {
+    assert.equal(derivePlanKey('hybrid', '2014-08-01'), 'hybrid-post2012');
+  });
+  await t.test('hybrid + pre-2012 memDate → hybrid-pre2012', () => {
+    assert.equal(derivePlanKey('hybrid', '2010-01-01'), 'hybrid-pre2012');
+  });
+  await t.test('contributory + post-2012 memDate → contributory-post2012', () => {
+    assert.equal(derivePlanKey('contributory', '2020-01-01'), 'contributory-post2012');
+  });
+  await t.test('contributory + pre-2012 memDate → contributory-pre2012', () => {
+    assert.equal(derivePlanKey('contributory', '2005-06-15'), 'contributory-pre2012');
+  });
+  await t.test('noncontributory → noncontributory regardless of memDate', () => {
+    assert.equal(derivePlanKey('noncontributory', '2014-08-01'), 'noncontributory');
+    assert.equal(derivePlanKey('noncontributory', '2005-06-15'), 'noncontributory');
+    assert.equal(derivePlanKey('noncontributory', ''),           'noncontributory');
+  });
+  await t.test('boundary 2012-07-01 is inclusive → post2012', () => {
+    assert.equal(derivePlanKey('hybrid',       '2012-07-01'), 'hybrid-post2012');
+    assert.equal(derivePlanKey('contributory', '2012-07-01'), 'contributory-post2012');
+  });
+  await t.test('day before boundary (2012-06-30) → pre2012', () => {
+    assert.equal(derivePlanKey('hybrid',       '2012-06-30'), 'hybrid-pre2012');
+    assert.equal(derivePlanKey('contributory', '2012-06-30'), 'contributory-pre2012');
+  });
+  await t.test('hybrid or contributory with empty memDate → ""', () => {
+    assert.equal(derivePlanKey('hybrid',       ''), '');
+    assert.equal(derivePlanKey('contributory', ''), '');
+  });
+  await t.test('unknown plan string → ""', () => {
+    assert.equal(derivePlanKey('',         '2014-08-01'), '');
+    assert.equal(derivePlanKey('bogus',    '2014-08-01'), '');
+    assert.equal(derivePlanKey(undefined,  '2014-08-01'), '');
+  });
+});
+
+// ── sickLeaveToMonths ───────────────────────────────────────────────
+// ERS rule: ≥ 60 days (480 hrs) required; 60d → 3mo, each further 20d
+// → +1mo, remainder ≥ 10d → +1mo. Combined, this produces a 10-day
+// step pattern after the 60-day threshold (the "remainder bump" alternates
+// with the "whole step" so months tick at days = 60, 70, 80, 90, …).
+test('sickLeaveToMonths', async (t) => {
+  await t.test('0 hours → 0', () => {
+    assert.equal(sickLeaveToMonths(0), 0);
+  });
+  await t.test('under 60-day threshold (472 hrs / 59 days) → 0', () => {
+    assert.equal(sickLeaveToMonths(472), 0);
+  });
+  await t.test('exactly 60 days (480 hrs) → 3', () => {
+    assert.equal(sickLeaveToMonths(480), 3);
+  });
+  await t.test('69 days (552 hrs) → 3 (remainder 9 < 10, no bump)', () => {
+    assert.equal(sickLeaveToMonths(552), 3);
+  });
+  await t.test('70 days (560 hrs) → 4 (remainder 10 bumps)', () => {
+    assert.equal(sickLeaveToMonths(560), 4);
+  });
+  await t.test('79 days (632 hrs) → 4 (remainder 19 still bumps; no double-count at 80)', () => {
+    assert.equal(sickLeaveToMonths(632), 4);
+  });
+  await t.test('80 days (640 hrs) → 4 (whole step, remainder reset to 0)', () => {
+    assert.equal(sickLeaveToMonths(640), 4);
+  });
+  await t.test('89 days (712 hrs) → 4 (remainder 9 < 10, no bump)', () => {
+    assert.equal(sickLeaveToMonths(712), 4);
+  });
+  await t.test('90 days (720 hrs) → 5 (remainder 10 bumps again)', () => {
+    assert.equal(sickLeaveToMonths(720), 5);
+  });
+});
+
+// ── blendedBenefit ──────────────────────────────────────────────────
+// Pension formula in isolation, separated from `calculateSeries` wiring.
+// Hybrid plans split service: NC portion at 1.25%, remainder at the plan's
+// multiplier. Non-hybrid plans use the uniform formula and ignore ncMonths.
+// Final cents are floored to whole dollars.
+test('blendedBenefit', async (t) => {
+  await t.test('non-hybrid uniform formula: 25 yos × $5000 AFC × 0.0125 multiplier', () => {
+    const cfg = PLAN_CONFIGS.noncontributory;
+    // 5000 × 25 × 0.0125 × 1.0 = 1562.5 → floor to whole dollars = 1562
+    assert.equal(blendedBenefit(300, 0, 5000, 1.0, 'noncontributory', cfg), 1562);
+  });
+
+  await t.test('hybrid with ncMonths=0 → uniform formula at hybrid multiplier', () => {
+    const cfg = PLAN_CONFIGS['hybrid-post2012'];
+    // 6000 × 20 × 0.0175 × 1.0 = 2100, exact
+    assert.equal(blendedBenefit(240, 0, 6000, 1.0, 'hybrid-post2012', cfg), 2100);
+  });
+
+  await t.test('hybrid with ncMonths == svcMonths → all 1.25% NC portion', () => {
+    const cfg = PLAN_CONFIGS['hybrid-post2012'];
+    // hybridYrs collapses to 0; 5000 × 10 × 0.0125 × 1.0 = 625
+    assert.equal(blendedBenefit(120, 120, 5000, 1.0, 'hybrid-post2012', cfg), 625);
+  });
+
+  await t.test('hybrid mixed: 48mo NC at 1.25% + 132mo hybrid at 2.00%', () => {
+    const cfg = PLAN_CONFIGS['hybrid-pre2012'];
+    // 4000 × (11×0.02 + 4×0.0125) × 1.0 = 4000 × 0.27 = 1080
+    assert.equal(blendedBenefit(180, 48, 4000, 1.0, 'hybrid-pre2012', cfg), 1080);
+  });
+
+  await t.test('cents-floor: fractional benefit truncates to whole dollars', () => {
+    const cfg = PLAN_CONFIGS.noncontributory;
+    // 5000 × (305/12) × 0.0125 × 1.0 = 1588.5416…, floors to 1588
+    assert.equal(blendedBenefit(305, 0, 5000, 1.0, 'noncontributory', cfg), 1588);
+  });
+
+  await t.test('ARF < 1 applied multiplicatively (early-retirement penalty)', () => {
+    const cfg = PLAN_CONFIGS.noncontributory;
+    // 5000 × 25 × 0.0125 × 0.8 = 1250
+    assert.equal(blendedBenefit(300, 0, 5000, 0.8, 'noncontributory', cfg), 1250);
+  });
+
+  await t.test('ARF = 0 (ineligible) → benefit 0 regardless of svc/AFC', () => {
+    const cfg = PLAN_CONFIGS['hybrid-post2012'];
+    assert.equal(blendedBenefit(240, 60, 5000, 0, 'hybrid-post2012', cfg), 0);
+  });
+
+  await t.test('ncMonths ignored on non-hybrid plans (same result as ncMonths=0)', () => {
+    const cfg = PLAN_CONFIGS.noncontributory;
+    // ncMonths=240 would collapse hybridYrs to 5 if it weren't ignored;
+    // result matches the uniform-formula case above (1562) instead.
+    assert.equal(blendedBenefit(300, 240, 5000, 1.0, 'noncontributory', cfg), 1562);
+  });
+});
+
+// ── primaryEligibility ──────────────────────────────────────────────
+// 5 plans × 3 outcomes decision table, with dual-threshold and exact-birthday
+// edges. `eligAge` is constructed inline as { year, month, day } literals to
+// isolate this function from primaryEligAge.
+test('primaryEligibility', async (t) => {
+  const age = (year, month = 0, day = 0) => ({ year, month, day });
+
+  // ── 5 plans × 3 outcomes (one representative case per cell) ─────
+  await t.test('noncontributory: age 55 / svc 30 → regular (alt path)', () => {
+    assert.equal(primaryEligibility('noncontributory', age(55), 30), 'regular');
+  });
+  await t.test('noncontributory: age 55 / svc 20 → early', () => {
+    assert.equal(primaryEligibility('noncontributory', age(55), 20), 'early');
+  });
+  await t.test('noncontributory: age 54 / svc 20 → ineligible (under 55)', () => {
+    assert.equal(primaryEligibility('noncontributory', age(54), 20), 'ineligible');
+  });
+
+  await t.test('hybrid-pre2012: age 62 / svc 5 → regular (first path)', () => {
+    assert.equal(primaryEligibility('hybrid-pre2012', age(62), 5), 'regular');
+  });
+  await t.test('hybrid-pre2012: age 55 / svc 20 → early', () => {
+    assert.equal(primaryEligibility('hybrid-pre2012', age(55), 20), 'early');
+  });
+  await t.test('hybrid-pre2012: age 54 / svc 30 → ineligible (under 55)', () => {
+    assert.equal(primaryEligibility('hybrid-pre2012', age(54), 30), 'ineligible');
+  });
+
+  await t.test('hybrid-post2012: age 65 / svc 10 → regular (first path)', () => {
+    assert.equal(primaryEligibility('hybrid-post2012', age(65), 10), 'regular');
+  });
+  await t.test('hybrid-post2012: age 55 / svc 20 → early', () => {
+    assert.equal(primaryEligibility('hybrid-post2012', age(55), 20), 'early');
+  });
+  await t.test('hybrid-post2012: age 54 / svc 30 → ineligible (under 55)', () => {
+    assert.equal(primaryEligibility('hybrid-post2012', age(54), 30), 'ineligible');
+  });
+
+  await t.test('contributory-pre2012: age 55 / svc 5 → regular', () => {
+    assert.equal(primaryEligibility('contributory-pre2012', age(55), 5), 'regular');
+  });
+  await t.test('contributory-pre2012: age 30 / svc 25 → early (any age, svc ≥ 25)', () => {
+    assert.equal(primaryEligibility('contributory-pre2012', age(30), 25), 'early');
+  });
+  await t.test('contributory-pre2012: age 54 / svc 24 → ineligible', () => {
+    assert.equal(primaryEligibility('contributory-pre2012', age(54), 24), 'ineligible');
+  });
+
+  await t.test('contributory-post2012: age 60 / svc 10 → regular', () => {
+    assert.equal(primaryEligibility('contributory-post2012', age(60), 10), 'regular');
+  });
+  await t.test('contributory-post2012: age 55 / svc 25 → early', () => {
+    assert.equal(primaryEligibility('contributory-post2012', age(55), 25), 'early');
+  });
+  await t.test('contributory-post2012: age 59 / svc 24 → ineligible', () => {
+    assert.equal(primaryEligibility('contributory-post2012', age(59), 24), 'ineligible');
+  });
+
+  // ── Dual-threshold edges ────────────────────────────────────────
+  await t.test('hybrid-pre2012: age 55 / svc 30 → regular (second path)', () => {
+    assert.equal(primaryEligibility('hybrid-pre2012', age(55), 30), 'regular');
+  });
+  await t.test('hybrid-pre2012: age 55 / svc 25 → early (svc ≥ 20 but no regular path)', () => {
+    assert.equal(primaryEligibility('hybrid-pre2012', age(55), 25), 'early');
+  });
+
+  // ── noncontributory: pbd > 0 exact-birthday edge at age 62 ──────
+  await t.test('noncontributory: age 62 exactly (pbd=0) / svc 10 → ineligible', () => {
+    // pbd = month*30 + day = 0, so the y>62 and (y===62 && pbd>0) branches
+    // both fail; (y>=55 && svc>=30) also fails since svc<30 → ineligible.
+    assert.equal(primaryEligibility('noncontributory', age(62, 0, 0), 10), 'ineligible');
+  });
+  await t.test('noncontributory: age 62 + 1 month (pbd > 0) / svc 10 → regular', () => {
+    assert.equal(primaryEligibility('noncontributory', age(62, 1, 0), 10), 'regular');
+  });
+
+  // ── Default fallthrough ─────────────────────────────────────────
+  await t.test('unknown plan key → ineligible', () => {
+    assert.equal(primaryEligibility('bogus', age(70), 30), 'ineligible');
+    assert.equal(primaryEligibility('',      age(70), 30), 'ineligible');
+  });
 });
 
 test('buildPaystubStream', async (t) => {
@@ -356,6 +573,66 @@ test('projectAfcAtRetirement', async (t) => {
     // Expected 5250 (no future raises after stream end). Pre-fix returned
     // 5250 * 1.05 = 5512.50.
     assert.equal(afc, 5250);
+  });
+});
+
+// ── solveDP ─────────────────────────────────────────────────────────
+// Official ERS top-N rule: pick the N non-overlapping 12-month windows
+// with the highest summed score. Two windows are non-overlapping iff the
+// earlier window's `endIncl` is strictly less than the later window's
+// `start`. Backtrack returns selected in ascending-start order regardless
+// of how the DP discovered them.
+test('solveDP', async (t) => {
+  // Build a 12-month window starting at index `start` with the given score.
+  const w = (start, score) => ({ start, endIncl: start + 11, score });
+
+  await t.test('empty windows array → null', () => {
+    assert.equal(solveDP([], 1), null);
+  });
+
+  await t.test('single window N=1 → that window with total = score', () => {
+    const r = solveDP([w(0, 100)], 1);
+    assert.notEqual(r, null);
+    assert.equal(r.total, 100);
+    assert.deepEqual(r.selected, [w(0, 100)]);
+  });
+
+  await t.test('two non-overlapping windows N=2 → both selected, total = sum', () => {
+    const w1 = w(0, 50);
+    const w2 = w(12, 70);
+    const r = solveDP([w1, w2], 2);
+    assert.equal(r.total, 120);
+    assert.deepEqual(r.selected, [w1, w2]);
+  });
+
+  await t.test('overlapping pair (endIncl=11 ≥ start=5) N=2 → null', () => {
+    const r = solveDP([w(0, 50), w(5, 70)], 2);
+    assert.equal(r, null);
+  });
+
+  await t.test('score-based selection: scores [10, 1, 9] N=2 → picks [10, 9] = 19, skips middle', () => {
+    const w1 = w(0,  10);
+    const w2 = w(12,  1);
+    const w3 = w(24,  9);
+    const r = solveDP([w1, w2, w3], 2);
+    assert.equal(r.total, 19);
+    assert.deepEqual(r.selected, [w1, w3]);
+  });
+
+  await t.test('three overlapping windows N=2 → null (no valid pair)', () => {
+    // starts 0, 3, 6 with endIncl 11, 14, 17 — every pair overlaps.
+    const r = solveDP([w(0, 10), w(3, 20), w(6, 30)], 2);
+    assert.equal(r, null);
+  });
+
+  await t.test('backtrack returns selected in ascending start order, not selection order', () => {
+    const w1 = w(0,  5);
+    const w2 = w(12, 8);
+    const w3 = w(24, 3);
+    const r = solveDP([w1, w2, w3], 3);
+    assert.equal(r.total, 16);
+    assert.deepEqual(r.selected, [w1, w2, w3]);
+    assert.deepEqual(r.selected.map(s => s.start), [0, 12, 24]);
   });
 });
 
@@ -876,6 +1153,82 @@ test('calculateSeries: paystubStream wiring', async (t) => {
     assert.ok(series.length > 0);
     assert.equal('vacationCurrentPayout' in series[0], false);
     assert.equal('vacationMaxPayout' in series[0], false);
+  });
+
+  await t.test('9. slHours=480 (3mo) + slRate=0 → pensionCurrentSL bumps svc by 3; projectedSL == currentSL', () => {
+    const series = calculateSeries(baseInputs({
+      slHours: 480,             // = 60 days = exactly 3 months SL credit
+      slRate:  0,               // no further accrual; currentMo == projectedMo
+      slAsOf:  new Date(2024, 0, 1),
+    }));
+
+    // First normal-retirement row out a few years (member is 65+ from start).
+    const row = series.find(r => r.retDate >= new Date(2030, 0, 1) && r.primaryPension != null);
+    assert.ok(row, 'expected at least one eligible row');
+
+    const plan   = 'hybrid-post2012';
+    const config = PLAN_CONFIGS[plan];
+    const dob    = new Date(1960, 0, 1);
+    const svcAtM  = serviceAtMonth(180, new Date(2024, 0, 1), row.retDate, null);
+    const eligAge = primaryEligAge(dob, row.retDate);
+    const arfAge  = primaryArfAge(dob, row.retDate);
+    const offElig = primaryEligibility(plan, eligAge, Math.floor(svcAtM / 12));
+    const arf     = primaryARF(offElig, plan, arfAge.year, arfAge.month);
+
+    const expected = blendedBenefit(svcAtM + 3, 0, 5000, arf, plan, config);
+    assert.equal(row.pensionCurrentSL,   expected);
+    assert.equal(row.pensionProjectedSL, expected);  // slRate=0 → no further accrual
+
+    // The raise+SL columns are populated because hybrid-post2012 is regular-
+    // mode and manual AFC triggers the synthetic stream → hasEffectiveStream.
+    assert.notEqual(row.pensionRaisesCurrentSL,   null);
+    assert.notEqual(row.pensionRaisesProjectedSL, null);
+  });
+
+  await t.test('10. slHours=null → all four SL columns null on every row (regression guard)', () => {
+    const series = calculateSeries(baseInputs());  // slHours: null by default
+    for (const row of series) {
+      assert.equal(row.pensionCurrentSL,         null);
+      assert.equal(row.pensionProjectedSL,       null);
+      assert.equal(row.pensionRaisesCurrentSL,   null);
+      assert.equal(row.pensionRaisesProjectedSL, null);
+    }
+  });
+
+  await t.test('11. SL credits to hybrid portion: ncSvcMonths is preserved across the SL bump', () => {
+    // Mixed-service hybrid: 48mo NC at 1.25% + 132mo hybrid at 0.0175 = 180 total.
+    // SL bumps svcAtM by 3mo; ncSvcMonths stays 48, so the bump credits to the
+    // hybrid portion (hybridYrs = (svcAtM+3-48)/12, ncYrs unchanged).
+    const series = calculateSeries(baseInputs({
+      ncSvcMonths: 48,
+      slHours:     480,
+      slRate:      0,
+      slAsOf:      new Date(2024, 0, 1),
+    }));
+
+    const row = series.find(r => r.retDate >= new Date(2030, 0, 1) && r.primaryPension != null);
+    assert.ok(row, 'expected at least one eligible row');
+
+    const plan   = 'hybrid-post2012';
+    const config = PLAN_CONFIGS[plan];
+    const dob    = new Date(1960, 0, 1);
+    const svcAtM  = serviceAtMonth(180, new Date(2024, 0, 1), row.retDate, null);
+    const eligAge = primaryEligAge(dob, row.retDate);
+    const arfAge  = primaryArfAge(dob, row.retDate);
+    const offElig = primaryEligibility(plan, eligAge, Math.floor(svcAtM / 12));
+    const arf     = primaryARF(offElig, plan, arfAge.year, arfAge.month);
+
+    // ncSvcMonths preserved at 48 in the SL-bumped call.
+    const expected = blendedBenefit(svcAtM + 3, 48, 5000, arf, plan, config);
+    assert.equal(row.pensionCurrentSL, expected);
+
+    // Sanity: primaryPension reconstructs without the SL bump.
+    const primaryRecon = blendedBenefit(svcAtM, 48, 5000, arf, plan, config);
+    assert.equal(row.primaryPension, primaryRecon);
+
+    // SL bump strictly raises the benefit (3 extra months at hybridMult > 0).
+    assert.ok(row.pensionCurrentSL > row.primaryPension,
+      `SL bump should lift benefit (${row.pensionCurrentSL} vs ${row.primaryPension})`);
   });
 });
 
