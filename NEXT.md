@@ -1,8 +1,4 @@
 # vac
-Change labels and legend labels on vacation graph, maybe
-current, current + accrued (no spending)
-+ projected raises, + accrued and raises (no spending)
-
 Under 'Earnings data' the 'Regular avg earnings' output is a bit confusing -- please replace that with 'Current monthly earnings as of', using the date and value from the most recent complete pay period.
 
 Ask about feasability of auto-populating the vacation-related hourly

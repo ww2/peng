@@ -3087,12 +3087,12 @@
       // no-raise pair above.
       const legRows = [
         [
-          { color: CHART.colorPrimary,           dash: null,  label: 'vacation payout (current)'              },
-          { color: CHART.colorSLProjected,       dash: '4,3', label: 'vacation payout (accrued, no spending)' },
+          { color: CHART.colorPrimary,           dash: null,  label: 'current vacation'              },
+          { color: CHART.colorSLProjected,       dash: '4,3', label: '+accrued, no spending' },
         ],
         ...(showRaises ? [[
-          { color: CHART.colorRaises,            dash: null,  label: '+ projected raises'                },
-          { color: CHART.colorRaisesSLProjected, dash: '4,3', label: '+ raises (accrued, no spending)'   },
+          { color: CHART.colorRaises,            dash: null,  label: 'current with projected raises'                },
+          { color: CHART.colorRaisesSLProjected, dash: '4,3', label: '+accrued, no spending'   },
         ]] : []),
       ];
       const swW = 20, gap1 = 5;
@@ -3163,11 +3163,11 @@
             // Pick the curve closest to the cursor's Y position — single
             // colored label, matching the pension chart's tooltip behavior.
             const candidates = [
-              { value: pt.maxPayout,     label: ' (accrued)', color: CHART.colorSLProjected },
+              { value: pt.maxPayout,     label: ' (+accrued)', color: CHART.colorSLProjected },
               { value: pt.currentPayout, label: ' (current)', color: CHART.colorPrimary     },
               ...(showRaises ? [
-                { value: pt.maxPayoutWithRaises,     label: ' (accrued, + raises)', color: CHART.colorRaisesSLProjected },
-                { value: pt.currentPayoutWithRaises, label: ' (current, + raises)', color: CHART.colorRaises            },
+                { value: pt.maxPayoutWithRaises,     label: ' (+accrued, with raises)', color: CHART.colorRaisesSLProjected },
+                { value: pt.currentPayoutWithRaises, label: ' (current, with raises)', color: CHART.colorRaises            },
               ] : []),
             ];
             const closest = candidates.reduce((best, c) =>
