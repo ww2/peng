@@ -749,7 +749,7 @@
 
     // ── Paystub cache ────────────────────────────────────────────
     const PAYSTUB_CACHE_KEY = 'paystubCache';
-    let cacheMode = new URLSearchParams(window.location.search).has('cache');
+    let cacheMode = new URLSearchParams(window.location.hash.slice(1)).has('cache');
 
     function refreshCacheClearBtn() {
       cacheClearBtnEl.hidden = localStorage.getItem(PAYSTUB_CACHE_KEY) === null;
@@ -827,18 +827,13 @@
     cacheToggleEl.checked = cacheMode;
     refreshCacheClearBtn();
 
-    // Single point of truth for the on/off transition: keeps cacheMode, the
-    // checkbox state, and the `?cache` URL flag in sync.
+    // Single point of truth for the on/off transition: keeps cacheMode and
+    // the checkbox state in sync. The URL bar is not touched — Stage 1 owns
+    // the clean-bar invariant; the cache flag is persisted via the snapshot
+    // (saveFormSnapshot, fired by both call sites' subsequent updateReloadLink).
     function setCacheMode(enabled) {
       cacheMode = enabled;
       cacheToggleEl.checked = enabled;
-      const params = new URLSearchParams(window.location.search);
-      if (enabled) params.set('cache', '');
-      else params.delete('cache');
-      // URLSearchParams.toString() emits `cache=` for empty values; we want `cache`.
-      const search = params.toString().replace(/=(?=&|$)/g, '');
-      const newUrl = `${window.location.pathname}${search ? '?' + search : ''}${window.location.hash}`;
-      history.replaceState(null, '', newUrl);
     }
 
     cacheClearBtnEl.addEventListener('click', () => {
@@ -1823,9 +1818,6 @@
       raisesNaEl.checked = false;
 
       updateReloadLink();
-      // Refresh URL to reflect the now-empty form. buildReloadUrl retains
-      // `?cache` when cacheMode is still on, so the toggle survives Clear.
-      history.replaceState(null, '', buildReloadUrl());
       drawChart();
       drawSeriesTable(null);
       // Vacation chart recomputes against the reset shared state (stillActive
@@ -1846,7 +1838,6 @@
       drawVacationChart(null);
       updateContractualVisibility();
       updateReloadLink();
-      history.replaceState(null, '', buildReloadUrl());
     }
 
     vacClearBtn.addEventListener('click', runClearVacation);
@@ -2141,6 +2132,54 @@
     lastDayEl.addEventListener('input', checkDateOrdering);
     stillActiveEl.addEventListener('change', checkDateOrdering);
 
+    // ── Form-state persistence (sessionStorage) ──────────────────
+    // Tab-scoped snapshot of every user-editable field, so F5 restores the
+    // form after the address-bar wipe at the end of the pre-fill block.
+    // URL-fragment params always win on load — if both exist, the snapshot
+    // is ignored so the URL is the authoritative restore.
+    const SNAPSHOT_KEY = 'formSnapshot';
+    function saveFormSnapshot() {
+      const snap = {
+        plan:          planEl.value,
+        dob:           dobEl.value,
+        memDate:       memDateEl.value,
+        svcYears:      svcYearsEl.value,
+        svcMonths:     svcMonthsEl.value,
+        ncSvcYears:    ncSvcYearsEl.value,
+        ncSvcMonths:   ncSvcMonthsEl.value,
+        svcAsOf:       svcAsOfEl.value,
+        lastDay:       lastDayEl.value,
+        stillActive:   stillActiveEl.checked,
+        afc:           manualAfcEl.value,
+        slHours:       slHoursEl.value,
+        slAsOf:        slAsOfEl.value,
+        slRate:        slRateEl.value,
+        vacHours:      vacHoursEl.value,
+        vacAsOf:       vacAsOfEl.value,
+        vacRate:       vacRateEl.value,
+        vacHourlyRate: vacHourlyRateEl.value,
+        raisesNa:      raisesNaEl.checked,
+        vacRaisesNa:   vacRaisesNaEl.checked,
+        cacheMode,
+      };
+      try { sessionStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap)); }
+      catch (e) { /* quota / unavailable — degrade silently */ }
+    }
+    function loadFormSnapshot() {
+      try {
+        const s = sessionStorage.getItem(SNAPSHOT_KEY);
+        return s ? JSON.parse(s) : null;
+      } catch (e) { return null; }
+    }
+
+    // Pasting a fragment URL into the address bar (or clicking the on-page
+    // reload link) fires `hashchange` rather than reloading the page, since
+    // path+search are unchanged. Force a real reload so the pre-fill block
+    // re-runs and hydrates from the new fragment. `replaceState` (used to
+    // wipe the bar after hydration) doesn't fire hashchange, so this won't
+    // loop.
+    window.addEventListener('hashchange', () => window.location.reload());
+
     // ── Reload link ──────────────────────────────────────────────
     function buildReloadUrl() {
       const params = new URLSearchParams();
@@ -2165,15 +2204,16 @@
       if (vacRateEl.value && vacRateEl.value !== '14') add('vacRate', vacRateEl);
       add('vacHourlyRate',  vacHourlyRateEl);
       if (cacheMode) params.set('cache', '');
-      // Strip `=` from presence-only flags so the URL reads `?cache` not `?cache=`.
+      // Strip `=` from presence-only flags so the URL reads `#cache` not `#cache=`.
       const qs = params.toString().replace(/=(?=&|$)/g, '');
-      return window.location.pathname + (qs ? '?' + qs : '');
+      return window.location.pathname + (qs ? '#' + qs : '');
     }
 
     function updateReloadLink() {
       const url = buildReloadUrl();
-      reloadLink.href       = url + '#reload-bar';
-      reloadLinkBottom.href = url + '#reload-bar-bottom';
+      reloadLink.href       = url;
+      reloadLinkBottom.href = url;
+      saveFormSnapshot();
     }
 
     [dobEl, memDateEl, svcYearsEl, svcMonthsEl, hybridSvcYearsEl, hybridSvcMonthsEl, ncSvcYearsEl, ncSvcMonthsEl, svcAsOfEl, lastDayEl, slHoursEl, slAsOfEl, slRateEl, vacHoursEl, vacAsOfEl, vacRateEl, vacHourlyRateEl].forEach(el =>
@@ -2181,6 +2221,7 @@
     );
     stillActiveEl.addEventListener('change', updateReloadLink);
     raisesNaEl.addEventListener('change', updateReloadLink);
+    vacRaisesNaEl.addEventListener('change', updateReloadLink);
     manualAfcEl.addEventListener('change', updateReloadLink);
 
     function commitAfc(e) {
@@ -2199,11 +2240,18 @@
     manualAfcEl.addEventListener('input',   commitAfc);
 
     // ── URL parameter pre-fill ────────────────────────────────────
-    // Supported params: plan, dob, memDate, svcYears, svcMonths, ncSvcYears, ncSvcMonths, svcAsOf, lastDay, afc, slHours, slAsOf, slRate, vacHours, vacAsOf, vacRate, vacHourlyRate, cache
-    // svcAsOf is the reference date for the entered credited service. lastDay (if set) implies
-    // the user is separated or has a planned retirement date; "Still active" is unchecked.
-    // Example: ?plan=hybrid&dob=1975-06-15&memDate=2014-08-01&svcYears=15&svcMonths=3&afc=4500
-    // Bad values are surfaced in the URL-error banner; good values still pre-fill.
+    // Supported params (URL fragment, e.g. #plan=hybrid&afc=4500): plan, dob,
+    // memDate, svcYears, svcMonths, ncSvcYears, ncSvcMonths, svcAsOf, lastDay,
+    // afc, slHours, slAsOf, slRate, vacHours, vacAsOf, vacRate, vacHourlyRate,
+    // cache. svcAsOf is the reference date for the entered credited service.
+    // lastDay (if set) implies the user is separated or has a planned
+    // retirement date; "Still active" is unchecked. Bad values are surfaced in
+    // the URL-error banner; good values still pre-fill.
+    //
+    // When the fragment is empty, hydration falls back to a sessionStorage
+    // snapshot (written on every form change via updateReloadLink → save…).
+    // The fragment wins over the snapshot if both exist, so clicking a reload
+    // link deterministically reproduces that link's state.
     {
       const SUPPORTED_PARAMS = ['plan','dob','memDate','svcYears','svcMonths','ncSvcYears','ncSvcMonths','svcAsOf','lastDay','afc','slHours','slAsOf','slRate','vacHours','vacAsOf','vacRate','vacHourlyRate','cache'];
       const PLAN_VALUES = ['hybrid','contributory','noncontributory'];
@@ -2240,7 +2288,43 @@
         });
       }
 
-      const p = new URLSearchParams(window.location.search);
+      const fragmentText = window.location.hash.slice(1);
+
+      // sessionStorage fallback: only when the fragment is empty. URL wins
+      // over snapshot when both present — clicking a reload link with a
+      // populated fragment deterministically restores that link's state
+      // rather than getting silently merged with stale tab state.
+      if (!fragmentText) {
+        const snap = loadFormSnapshot();
+        if (snap) {
+          if (snap.plan)          planEl.value          = snap.plan;
+          if (snap.dob)           dobEl.value           = snap.dob;
+          if (snap.memDate)       memDateEl.value       = snap.memDate;
+          if (snap.svcYears)      svcYearsEl.value      = snap.svcYears;
+          if (snap.svcMonths)     svcMonthsEl.value     = snap.svcMonths;
+          if (snap.ncSvcYears)    ncSvcYearsEl.value    = snap.ncSvcYears;
+          if (snap.ncSvcMonths)   ncSvcMonthsEl.value   = snap.ncSvcMonths;
+          if (snap.svcAsOf)       svcAsOfEl.value       = snap.svcAsOf;
+          if (snap.lastDay)       lastDayEl.value       = snap.lastDay;
+          if (typeof snap.stillActive === 'boolean') stillActiveEl.checked = snap.stillActive;
+          if (snap.afc)           manualAfcEl.value     = snap.afc;
+          if (snap.slHours)       slHoursEl.value       = snap.slHours;
+          if (snap.slAsOf)        slAsOfEl.value        = snap.slAsOf;
+          if (snap.slRate)        slRateEl.value        = snap.slRate;
+          if (snap.vacHours)      vacHoursEl.value      = snap.vacHours;
+          if (snap.vacAsOf)       vacAsOfEl.value       = snap.vacAsOf;
+          if (snap.vacRate)       vacRateEl.value       = snap.vacRate;
+          if (snap.vacHourlyRate) vacHourlyRateEl.value = snap.vacHourlyRate;
+          raisesNaEl.checked    = !!snap.raisesNa;
+          vacRaisesNaEl.checked = !!snap.vacRaisesNa;
+          if (snap.cacheMode) {
+            cacheMode = true;
+            cacheToggleEl.checked = true;
+          }
+        }
+      }
+
+      const p = new URLSearchParams(fragmentText);
 
       // Plan
       if (p.has('plan') && p.get('plan') !== '') {
@@ -2349,7 +2433,13 @@
       updateManualAfcNote();
       updateReloadLink();
 
-      // Restore cached paystubs (if `?cache` and localStorage has a hit).
+      // Wipe the fragment from the address bar so DOB / financials aren't
+      // visible after hydration. The reload link's `href` still carries the
+      // full fragment URL (reset above by updateReloadLink), so dev-time
+      // copy/save still works.
+      history.replaceState(null, '', window.location.pathname);
+
+      // Restore cached paystubs (if `#cache` and localStorage has a hit).
       // Runs after form pre-fill so computeAndFillAfc sees the right plan
       // key, and before the auto-fire below so the AFC field is populated
       // first. Failure falls through to normal no-cache behavior.

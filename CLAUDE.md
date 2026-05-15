@@ -8,15 +8,15 @@ A single-file (`index.html`) browser-based pension calculator for ERS (Employees
 
 ## Running the App
 
-Open `index.html` in a browser via `file://`. URL params are accepted for development convenience:
+Open `index.html` in a browser via `file://`. URL params are accepted for development convenience and live in the **fragment** (after `#`), not the query string, so they're never transmitted to the hosting server:
 
 ```
-file:///path/to/index.html?plan=hybrid&memDate=2014-08-01&dob=1975-06-15&svcYears=15&svcMonths=3&svcAsOf=2024-01-01&afc=4500&slHours=240&slAsOf=2024-01-01&vacHours=400&vacAsOf=2026-01-01&vacHourlyRate=45
+file:///path/to/index.html#plan=hybrid&memDate=2014-08-01&dob=1975-06-15&svcYears=15&svcMonths=3&svcAsOf=2024-01-01&afc=4500&slHours=240&slAsOf=2024-01-01&vacHours=400&vacAsOf=2026-01-01&vacHourlyRate=45
 ```
 
 Full param list and parsing rules live in the pre-fill block at `index.html:2110+`. Notable behaviors:
 - Pension and vacation auto-fire independently — a URL with only pension fields fires only the pension chart, etc.
-- `?cache` is a presence-only flag mirroring the "Cache paystubs across reloads" checkbox.
+- `#cache` is a presence-only flag mirroring the "Cache paystubs across reloads" checkbox.
 - Bad/unknown params route to `#url-error-banner` (pension-side) or `#vac-error-banner` (vacation-side, sits above `#group-vacation-input`).
 
 ## Tests
