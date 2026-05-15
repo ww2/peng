@@ -481,9 +481,12 @@
   </fieldset>
 
   <!-- ── Contractual adjustments (read-only) ──────────────────── -->
-  <!-- Visibility is toggled at runtime: shown only when a paystub stream
-       drives the calculation (manual-AFC entries can't be projected). -->
-  <fieldset id="group-contractual-input" hidden>
+  <!-- Always visible: the RAISES schedule is nearly always relevant to at
+       least one of the two graphs (vacation always compounds raises, pension
+       projects them when paystubs are loaded or a regular-mode manual AFC
+       is set). The pension/vacation `raises-na` checkboxes still auto-lock
+       to communicate when their respective graph can't apply raises. -->
+  <fieldset id="group-contractual-input">
     <legend>Contractual adjustments</legend>
     <div class="form-rows">
 
@@ -679,7 +682,6 @@
     const raisesNaEl       = document.getElementById('raises-na');
     const raisesNaTextEl   = document.getElementById('raises-na-text');
     const raisesTableBodyEl = document.getElementById('raises-table-body');
-    const contractualGroupEl = document.getElementById('group-contractual-input');
     const manualAfcEl      = document.getElementById('manual-afc');
 
     // Render the projected-raises table from RAISES (defined in lib/pension.js)
@@ -1549,9 +1551,31 @@
       return group1Ok && parseFloat(manualAfcEl.value) > 0 && slOk;
     }
 
+    // Mark empty pension-required fields with `input-error` once the user has
+    // started filling the form — mirrors what graphBtn's click handler marks,
+    // but pre-emptively so the missing fields are obvious before the user
+    // hunts for a (disabled) Generate button. Trigger only fires when at
+    // least one value-bearing required field has content; the all-empty
+    // initial state stays unmarked. stillActive is excluded from the trigger
+    // because it defaults to checked (would always satisfy the condition).
+    function highlightMissingRequired() {
+      const anyFilled = !!(planEl.value || dobEl.value || memDateEl.value
+        || svcAsOfEl.value || lastDayEl.value || manualAfcEl.value.trim());
+      const set = (el, missing) => el.classList.toggle('input-error', anyFilled && missing);
+      set(planEl,    !planEl.value);
+      set(dobEl,     !dobEl.value);
+      set(memDateEl, !memDateEl.value);
+      set(svcAsOfEl, !svcAsOfEl.value);
+      set(lastDayEl, !stillActiveEl.checked && !lastDayEl.value);
+      set(manualAfcEl, !earningsFieldset.disabled && !(parseFloat(manualAfcEl.value) > 0));
+      const slH = parseFloat(slHoursEl.value);
+      set(slAsOfEl, !isNaN(slH) && slH > 0 && !slAsOfEl.value);
+    }
+
     function maybeCalculate() {
       const ok = canCalculate();
       graphBtn.disabled = !ok;
+      highlightMissingRequired();
       if (ok) runCalculate();
       else {
         drawChart();
@@ -1814,6 +1838,7 @@
       graphBtn.disabled          = true;
       memDateEl.classList.remove('input-error');
       setMemDateBannerEntry(null);
+      highlightMissingRequired();
 
       raisesNaEl.checked = false;
 
@@ -2035,26 +2060,21 @@
       }
     }
 
-    // Visibility of the contractual-adjustments fieldset is driven by two
-    // independent consumers of the RAISES schedule: the pension chart (only
-    // when calculateSeries actually projects raises through AFC) and the
-    // vacation chart (always uses raises to compound the hourly rate when it
-    // can graph). `pensionUsesRaises` mirrors the `raisesProjected` gate
-    // inside `runCalculate` (a paystub stream OR a regular-mode synthetic
-    // stream built from manual AFC); recomputed locally so this helper can
-    // run from any path. Also drives the pension `raises-na` NOPROJ
-    // auto-lock so the lock stays current outside `runCalculate` (e.g. on
-    // incomplete pension forms). The LASTDAY-suffix branch is set only from
-    // `runCalculate`, where the real `noRaisesApply` is known — that call
-    // supersedes when it fires after this helper.
+    // Keeps the pension `raises-na` NOPROJ auto-lock current outside
+    // `runCalculate` (e.g. on incomplete pension forms). `pensionUsesRaises`
+    // mirrors the `raisesProjected` gate inside `runCalculate` (a paystub
+    // stream OR a regular-mode synthetic stream built from manual AFC);
+    // recomputed locally so this helper can run from any path. The
+    // LASTDAY-suffix branch is set only from `runCalculate`, where the real
+    // `noRaisesApply` is known — that call supersedes when it fires after
+    // this helper. Fieldset visibility is no longer toggled here: the
+    // contractual section is always shown.
     function updateContractualVisibility() {
       const planKey    = derivePlanKey(planEl.value, memDateEl.value);
       const planConfig = PLAN_CONFIGS[planKey];
       const manualAfc  = parseFloat(manualAfcEl.value);
       const pensionUsesRaises = lastStubs.length > 0
         || (planConfig?.mode === 'regular' && manualAfc > 0);
-      const vacationActive    = canCalculateVacation();
-      contractualGroupEl.hidden = !(pensionUsesRaises || vacationActive);
       applyRaisesNALock({ pensionUsesRaises, noRaisesApply: false, planMode: planConfig?.mode });
     }
 
@@ -2458,6 +2478,7 @@
       memDateEl.addEventListener('input', validateMemDate);
       const ok = canCalculate();
       graphBtn.disabled = !ok;
+      highlightMissingRequired();
       if (ok) requestAnimationFrame(runCalculate);
       const vacOk = canCalculateVacation();
       vacGraphBtn.disabled = !vacOk;
