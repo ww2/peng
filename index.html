@@ -1991,9 +1991,13 @@
     // suffix swaps when the plan mode changes) just swap the suffix without
     // touching prior. Release restores prior. Table visibility is intentionally
     // decoupled — see updateContractualVisibility.
+    // NOPROJ-paystub uses a distinct base ("not applied" vs "do not apply") to
+    // frame the state as a fixable current condition rather than a permanent
+    // rule — paystubs are a one-click load away from flipping it.
     const RAISES_NA_BASE_LABEL            = 'Projected raises do not apply';
+    const RAISES_NA_NOPROJ_PAYSTUB_LABEL  = 'Projected raises not applied';
     const RAISES_NA_LASTDAY_SUFFIX        = ' due to the Last day of service above';
-    const RAISES_NA_NOPROJ_PAYSTUB_SUFFIX = ' — load paystubs above to project raises through pension';
+    const RAISES_NA_NOPROJ_PAYSTUB_SUFFIX = ' — load paystubs below to project raises through pension';
     const RAISES_NA_NOPROJ_AFC_SUFFIX     = ' — enter monthly AFC below to project raises through pension';
     function applyRaisesNALock({ pensionUsesRaises, noRaisesApply, planMode }) {
       const noprojSuffix = planMode === 'regular'
@@ -2002,15 +2006,18 @@
       const suffix = !pensionUsesRaises
         ? noprojSuffix
         : (noRaisesApply ? RAISES_NA_LASTDAY_SUFFIX : null);
+      const baseLabel = suffix === RAISES_NA_NOPROJ_PAYSTUB_SUFFIX
+        ? RAISES_NA_NOPROJ_PAYSTUB_LABEL
+        : RAISES_NA_BASE_LABEL;
       const wasLocked = raisesNaEl.dataset.forced === '1';
       if (suffix && !wasLocked) {
         raisesNaEl.dataset.prior   = raisesNaEl.checked ? '1' : '0';
         raisesNaEl.dataset.forced  = '1';
         raisesNaEl.checked         = true;
         raisesNaEl.disabled        = true;
-        raisesNaTextEl.textContent = RAISES_NA_BASE_LABEL + suffix;
+        raisesNaTextEl.textContent = baseLabel + suffix;
       } else if (suffix && wasLocked) {
-        raisesNaTextEl.textContent = RAISES_NA_BASE_LABEL + suffix;
+        raisesNaTextEl.textContent = baseLabel + suffix;
       } else if (!suffix && wasLocked) {
         const prior = raisesNaEl.dataset.prior === '1';
         raisesNaEl.checked         = prior;
