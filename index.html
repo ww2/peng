@@ -543,9 +543,7 @@
           <label style="font-size:0.8rem; display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
             <input type="checkbox" id="cache-toggle" style="margin:0;"> Cache paystubs across reloads
           </label>
-        </div>
-        <div class="form-row" id="cache-clear-hint" style="font-size: 0.7rem; color: #888;" hidden>
-          Use the "Clear pension fields" button to clear cached paystub data
+          <button type="button" id="cache-clear-btn" hidden style="font-size:0.75rem; padding:0.2rem 0.6rem; cursor:pointer;">Clear cache</button>
         </div>
         <div id="afc-computed"></div>
         <div id="afc-date-range"></div>
@@ -715,7 +713,7 @@
     const cancelBtn        = document.getElementById('cancel-btn');
     const pickerPath       = document.getElementById('picker-path');
     const cacheToggleEl    = document.getElementById('cache-toggle');
-    const cacheClearHintEl = document.getElementById('cache-clear-hint');
+    const cacheClearBtnEl  = document.getElementById('cache-clear-btn');
     const afcComputedEl     = document.getElementById('afc-computed');
     const afcDateRange      = document.getElementById('afc-date-range');
     const regularEarningsEl = document.getElementById('regular-earnings');
@@ -753,8 +751,8 @@
     const PAYSTUB_CACHE_KEY = 'paystubCache';
     let cacheMode = new URLSearchParams(window.location.search).has('cache');
 
-    function refreshCacheHint() {
-      cacheClearHintEl.hidden = localStorage.getItem(PAYSTUB_CACHE_KEY) === null;
+    function refreshCacheClearBtn() {
+      cacheClearBtnEl.hidden = localStorage.getItem(PAYSTUB_CACHE_KEY) === null;
     }
 
     // Drives the "N stubs ..." line. When the cache is enabled and a cache
@@ -795,12 +793,12 @@
       if (!cacheMode) return;
       const blob = JSON.stringify({ cachedAt: new Date().toISOString(), stubs });
       localStorage.setItem(PAYSTUB_CACHE_KEY, blob);
-      refreshCacheHint();
+      refreshCacheClearBtn();
     }
 
     function clearCache() {
       localStorage.removeItem(PAYSTUB_CACHE_KEY);
-      refreshCacheHint();
+      refreshCacheClearBtn();
     }
 
     function loadCache() {
@@ -827,23 +825,37 @@
     }
 
     cacheToggleEl.checked = cacheMode;
-    refreshCacheHint();
+    refreshCacheClearBtn();
 
-    cacheToggleEl.addEventListener('change', () => {
-      cacheMode = cacheToggleEl.checked;
+    // Single point of truth for the on/off transition: keeps cacheMode, the
+    // checkbox state, and the `?cache` URL flag in sync.
+    function setCacheMode(enabled) {
+      cacheMode = enabled;
+      cacheToggleEl.checked = enabled;
       const params = new URLSearchParams(window.location.search);
-      if (cacheMode) params.set('cache', '');
+      if (enabled) params.set('cache', '');
       else params.delete('cache');
       // URLSearchParams.toString() emits `cache=` for empty values; we want `cache`.
       const search = params.toString().replace(/=(?=&|$)/g, '');
       const newUrl = `${window.location.pathname}${search ? '?' + search : ''}${window.location.hash}`;
       history.replaceState(null, '', newUrl);
+    }
 
+    cacheClearBtnEl.addEventListener('click', () => {
+      clearCache();
+      // Turning the toggle off too — leaving it on would silently re-cache on
+      // the next scan, contradicting the user's just-expressed intent.
+      setCacheMode(false);
+      refreshAfcComputedText();
+      updateReloadLink();
+    });
+
+    cacheToggleEl.addEventListener('change', () => {
+      setCacheMode(cacheToggleEl.checked);
       // If paystubs are already loaded when the user opts in, persist them now
       // so they don't have to reload + re-pick to populate the cache.
       if (cacheMode && lastStubs.length) persistCache(lastStubs);
       refreshAfcComputedText();
-
       updateReloadLink();
     });
 
@@ -1783,9 +1795,6 @@
       cancelRequested = false;
       window._debug.lastPaystubStream = [];
       renderRaisesTable();
-      clearCache();
-      cacheToggleEl.checked = false;
-      cacheMode             = false;
 
       // Picker UI
       pickerEl.value           = '';
@@ -1814,8 +1823,8 @@
       raisesNaEl.checked = false;
 
       updateReloadLink();
-      // Strip URL params now that the form is empty and cache toggle is off —
-      // mirrors the cache-toggle handler's replaceState pattern.
+      // Refresh URL to reflect the now-empty form. buildReloadUrl retains
+      // `?cache` when cacheMode is still on, so the toggle survives Clear.
       history.replaceState(null, '', buildReloadUrl());
       drawChart();
       drawSeriesTable(null);
